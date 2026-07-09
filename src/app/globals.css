@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --muted: #f7f7f7;
+  --foreground: rgba(0, 0, 0, 0.94);
+  --muted-foreground: rgba(0, 0, 0, 0.55);
+  --placeholder: rgba(0, 0, 0, 0.42);
+  --inverse: #ffffff;
+  --border: #e5e7eb;
+  --border-a11y: rgba(0, 0, 0, 0.42);
+  --input: rgba(0, 0, 0, 0.42);
+  --primary-foreground: #5319e0;
+  --destructive-foreground: #b30426;
+  --warning-foreground: #953d00;
+  --success-foreground: #006450;
+  --info-foreground: #5319e0;
+  --neutral-foreground: rgba(0, 0, 0, 0.68);
+  --primary-background: #eae7ff;
+  --destructive-background: #ffe4e2;
+  --warning-background: #ffe6bd;
+  --success-background: #bef6e3;
+  --info-background: #eae7ff;
+  --neutral-background: rgba(0, 0, 0, 0.06);
+  --primary-background-active: #d9d4ff;
+  --destructive-background-active: #ffccc8;
+  --warning-background-active: #fdd291;
+  --success-background-active: #8bebd0;
+  --info-background-active: #d9d4ff;
+  --neutral-background-active: rgba(0, 0, 0, 0.11);
+  --primary: #6e3fff;
+  --destructive: #d92739;
+  --success: #007f66;
+  --warning: #ba5200;
+  --info: #6e3fff;
+  --neutral: rgba(0, 0, 0, 0.55);
+  --primary-hover: #5319e0;
+  --destructive-hover: #b30426;
+  --success-hover: #006450;
+  --warning-hover: #953d00;
+  --info-hover: #5319e0;
+  --neutral-hover: #535353;
+  --primary-active: #4715af;
+  --destructive-active: #92001f;
+  --success-active: #085040;
+  --warning-active: #7a2f00;
+  --info-active: #4715af;
+  --neutral-active: #3b3b3b;
+}
+
+@theme inline {
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-black: #000000;
+  --color-white: #ffffff;
+
+  --font-family-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-family-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-border-color: #e5e7eb;
+  --color-body-bg: var(--background);
+  --color-subtle-bg: var(--muted);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--inverse);
+  --color-primary-fg: var(--primary-foreground);
+  --color-primary-bg: var(--primary-background);
+  --color-primary-bg-active: var(--primary-background-active);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+
+  --color-success: var(--success);
+  --color-success-fg: var(--success-foreground);
+  --color-success-bg: var(--success-background);
+  --color-success-bg-active: var(--success-background-active);
+  --color-success-hover: var(--success-hover);
+  --color-success-active: var(--success-active);
+
+  --color-danger: var(--destructive);
+  --color-danger-fg: var(--destructive-foreground);
+  --color-danger-bg: var(--destructive-background);
+  --color-danger-bg-active: var(--destructive-background-active);
+  --color-danger-hover: var(--destructive-hover);
+  --color-danger-active: var(--destructive-active);
+
+  --color-destructive: var(--destructive);
+  --color-neutral: var(--neutral);
+  --color-neutral-fg: var(--neutral-foreground);
+  --color-neutral-bg: var(--neutral-background);
+  --color-neutral-bg-active: var(--neutral-background-active);
+  --color-neutral-hover: var(--neutral-hover);
+  --color-neutral-active: var(--neutral-active);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-backgrounds: var(--background);
+  --color-inverse-text: var(--inverse);
+
+  --color-surface: #f9f9fb;
+  --color-surface-bright: #f9f9fb;
+  --color-surface-grey: #f1f1f4;
+  --color-surface-container: #edeef0;
+  --color-surface-container-low: #f3f3f5;
+  --color-on-surface: #1a1c1d;
+  --color-on-surface-variant: #484456;
+  --color-on-primary: #ffffff;
+  --color-border-muted: #e2e8f0;
+  --color-text-subtle: #64748b;
+
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  --spacing-margin-page: 2rem;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-family-sans);
+    background-color: var(--color-surface);
+    color: var(--color-on-surface);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
