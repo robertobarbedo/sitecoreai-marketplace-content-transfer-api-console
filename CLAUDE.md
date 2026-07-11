@@ -14,7 +14,7 @@ attempt runtime testing.** Verification is limited to:
 
 - `npm run build` (type-check + lint + compile) must pass
 - Manual testing happens only inside SitecoreAI after the app is registered
-  in Developer Studio (fullscreen extension point → the root route `/`)
+  in Developer Studio (**standalone** extension point → the root route `/`)
 
 ## Project facts
 
@@ -26,20 +26,39 @@ attempt runtime testing.** Verification is limited to:
     on the DESTINATION env; get-chunk runs on the SOURCE.
   - **Item Transfer API** (v3): `https://{host}/sitecore/shell/api/v3/ItemsTransfer/...`
     — DESTINATION env only.
-- Based on the marketplace starter kit; only the **fullscreen** extension
+- Based on the marketplace starter kit; only the **standalone** extension
   point is used, served from the root route (`src/app/page.tsx`).
+  Standalone apps are **global** (not per tenant): `getTenants()`
+  (sitecore-graphql.ts) maps `application.context.resourceAccess` to a tenant
+  list (max ~3). The tenant selection ("Save in Environment:" buttons in the
+  connections modal; remembered in localStorage) only chooses WHERE settings
+  are saved/edited — on startup the page loads the connections of EVERY
+  tenant (`connectionsByTenant` in page.tsx) and the source/destination
+  dropdowns always offer the merged list (`allConnections`, deduped by id).
 - All sibling folders under `C:\Marketplace` are reference material only —
   never modify them. This app mirrors the architecture of
   `sitecoreai-marketplace-experience-edge-admin-console`.
 - Settings are a **list of environment connections** (label, host, automation
   client ID/secret), stored in the Sitecore content tree at
-  `/sitecore/system/Modules/ContentTransferConsole/Settings`, JSON in the
-  `Value` field.
+  `/sitecore/system/Modules/Marketplace/ContentTransferConsole/Settings`,
+  JSON in the `Value` field — in the content tree of the **selected settings
+  tenant**. Loads fall back to the legacy pre-Marketplace path
+  (`LEGACY_SETTINGS_ITEM_PATH` in constants.ts); saves always write the new
+  path and ensure both the Marketplace and module folders exist.
 - Browser → own Next.js API routes (env passed via `x-ct-*` headers) → OAuth
   token (`auth.sitecorecloud.io`, client_credentials, audience
   `https://api.sitecorecloud.io`, ~24 h expiry) → environment API at
   `https://{host}`. Tokens are cached server-side only; 401 **and** 403 (the
   documented expired-JWT status) evict + retry once.
+- **Secrets at rest**: client secrets are AES-256-GCM encrypted
+  (`enc:v1:<iv>:<tag>:<data>`, key = 32-byte base64 `CT_ENCRYPTION_KEY` env
+  var) by `src/lib/transfer/crypto.ts`. Invariant: encryption is exposed via
+  the encrypt-only route `/api/crypto/encrypt`; **never add a decrypt
+  endpoint** — decryption happens only inside `transferFetch` (client.ts)
+  right before the token exchange. Legacy plaintext secrets must keep
+  passing through `decryptSecret()` unchanged. Missing key ⇒ plaintext
+  fallback with a warning in the connections modal; decrypt failures map to
+  the `encryption_error` typed error.
 - The chunk copy route buffers each chunk in server memory and forwards the
   bytes untouched (media = compressed, content = encrypted; the Save endpoint
   requires the `isMedia` query param read from the GET response's

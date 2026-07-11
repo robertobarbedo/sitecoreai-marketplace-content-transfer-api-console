@@ -25,9 +25,15 @@ in a step-by-step console:
 
 Built on the [Sitecore Marketplace starter kit](https://github.com/Sitecore/marketplace-starter)
 (Next.js 15 + React 19 + `@sitecore-marketplace-sdk`), using the
-**fullscreen extension point** and the Blok design language (Tailwind CSS v4 +
+**standalone extension point** and the Blok design language (Tailwind CSS v4 +
 Radix UI), following the same architecture as the sibling
 `sitecoreai-marketplace-experience-edge-admin-console`.
+
+Standalone apps are **global** (installed once per organization, not per
+tenant), so the settings dialog starts with a **Save in Environment:**
+selector — up to three tenant buttons (e.g. dev / QA / prod) choosing which
+tenant's content tree stores the connection list. Each tenant keeps its own
+connections; the last choice is remembered per browser.
 
 ## How authentication works
 
@@ -38,12 +44,32 @@ SitecoreAI Deploy (**Credentials → Environment → Create credentials →
 Automation** — requires Organization Admin or Owner).
 
 - Connections are entered in the app's settings dialog and persisted in the
-  Sitecore content tree at
-  `/sitecore/system/Modules/ContentTransferConsole/Settings` (JSON in the
-  `Value` field), via the Marketplace SDK's authoring GraphQL.
-  > ⚠️ Anyone with authoring access to `/sitecore/system/Modules` can read the
-  > stored secrets. This is the same tradeoff accepted by sibling marketplace
-  > modules that store settings in the content tree.
+  content tree of the **selected settings tenant** at
+  `/sitecore/system/Modules/Marketplace/ContentTransferConsole/Settings`
+  (JSON in the `Value` field), via the Marketplace SDK's authoring GraphQL.
+  Settings previously stored at the legacy path
+  (`/sitecore/system/Modules/ContentTransferConsole/Settings`) are still
+  read as a fallback and move to the new path on the next save.
+- **Client secrets are encrypted at rest** (AES-256-GCM, stored as
+  `enc:v1:<iv>:<tag>:<data>`) using a key from the `CT_ENCRYPTION_KEY`
+  environment variable — set it in Vercel (and `.env.local` for dev):
+
+  ```bash
+  # generate a key
+  openssl rand -base64 32
+  ```
+
+  - Encryption happens server-side at save time via the **encrypt-only**
+    route `POST /api/crypto/encrypt`. There is deliberately **no decrypt
+    endpoint**: ciphertext is decrypted exclusively inside the proxy right
+    before the OAuth token exchange, so tree read-access never yields
+    plaintext.
+  - If the key is not set, saving falls back to **plaintext with a visible
+    warning** in the settings dialog; re-saving after configuring the key
+    encrypts every connection in the list (legacy plaintext values keep
+    working either way).
+  - Rotating/changing the key orphans existing ciphertexts — re-enter the
+    secrets after a rotation.
 - The browser never calls `auth.sitecorecloud.io` or the environment APIs
   directly (they are not CORS-enabled). All calls go through this app's own
   Next.js API routes, which exchange the credentials for an OAuth token
@@ -70,7 +96,7 @@ browser — the Marketplace SDK requires the app to run inside SitecoreAI.
 1. Expose your dev server over HTTPS (e.g. `ngrok http 5002`) or deploy
    (e.g. Vercel).
 2. In the Sitecore Cloud Portal, open the **Developer Studio** and register a
-   new Marketplace app with the **Fullscreen** extension point pointing to
+   new Marketplace app with the **Standalone** extension point pointing to
    `https://<your-host>/`.
 3. Install the app for your organization and open it from the apps menu.
 

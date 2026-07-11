@@ -20,13 +20,17 @@ import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { validateConnection } from "@/src/utils/transfer-api";
-import type { EnvironmentConnection } from "@/src/types/transfer";
+import {
+  validateConnection,
+  getEncryptionStatus,
+  encryptSecretRemote,
+  isEncryptedSecret,
+} from "@/src/utils/transfer-api";
+import type { EnvironmentConnection, TenantInfo } from "@/src/types/transfer";
 
 interface ConnectionsModalProps {
   open: boolean;
@@ -34,6 +38,12 @@ interface ConnectionsModalProps {
   connections: EnvironmentConnection[];
   /** Persists the full connection list; throws on failure. */
   onSave: (connections: EnvironmentConnection[]) => Promise<void>;
+  /** Tenants the (global) standalone app can store its settings in. */
+  tenants: TenantInfo[];
+  selectedTenantId: string;
+  onTenantChange: (tenantId: string) => void;
+  /** True while the selected tenant's connections are being (re)loaded. */
+  loadingConnections?: boolean;
 }
 
 type TestState =
@@ -47,7 +57,10 @@ interface FormState {
   label: string;
   host: string;
   clientId: string;
+  /** Secret typed in this session (empty while editing = keep the stored one). */
   clientSecret: string;
+  /** Stored (usually encrypted) secret of the connection being edited. */
+  existingSecret: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -56,6 +69,7 @@ const EMPTY_FORM: FormState = {
   host: "",
   clientId: "",
   clientSecret: "",
+  existingSecret: "",
 };
 
 function normalizeHost(raw: string): string {
@@ -70,25 +84,55 @@ export function ConnectionsModal({
   onOpenChange,
   connections,
   onSave,
+  tenants,
+  selectedTenantId,
+  onTenantChange,
+  loadingConnections = false,
 }: ConnectionsModalProps) {
   const [form, setForm] = useState<FormState | null>(null);
   const [showSecret, setShowSecret] = useState(false);
   const [test, setTest] = useState<TestState>({ status: "idle" });
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [encryptionConfigured, setEncryptionConfigured] = useState<
+    boolean | null
+  >(null);
 
+  // Check once per open whether the server can encrypt secrets at rest.
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    let cancelled = false;
+    getEncryptionStatus().then((configured) => {
+      if (!cancelled) setEncryptionConfigured(configured);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  // Reset the view when the dialog opens or the settings tenant switches.
+  useEffect(() => {
+    if (open && !loadingConnections) {
       setForm(connections.length === 0 ? { ...EMPTY_FORM } : null);
       setShowSecret(false);
       setTest({ status: "idle" });
       setSaving(false);
       setDeletingId(null);
     }
-  }, [open, connections.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selectedTenantId, loadingConnections, connections.length]);
 
   const startEdit = (connection: EnvironmentConnection) => {
-    setForm({ ...connection });
+    // The browser only holds ciphertext for saved secrets, so the field
+    // starts empty; leaving it blank keeps the stored secret.
+    setForm({
+      id: connection.id,
+      label: connection.label,
+      host: connection.host,
+      clientId: connection.clientId,
+      clientSecret: "",
+      existingSecret: connection.clientSecret,
+    });
     setShowSecret(false);
     setTest({ status: "idle" });
   };
@@ -98,12 +142,18 @@ export function ConnectionsModal({
     if (test.status !== "idle") setTest({ status: "idle" });
   };
 
+  // While editing, a blank secret field means "keep the stored secret"; the
+  // server decrypts stored ciphertext transparently, so tests work with it.
+  const effectiveSecret = form
+    ? form.clientSecret.trim() || form.existingSecret
+    : "";
+
   const formComplete =
     !!form &&
     form.label.trim() !== "" &&
     normalizeHost(form.host) !== "" &&
     form.clientId.trim() !== "" &&
-    form.clientSecret.trim() !== "";
+    effectiveSecret !== "";
 
   const handleTest = async () => {
     if (!form) return;
@@ -113,7 +163,7 @@ export function ConnectionsModal({
       label: form.label.trim(),
       host: normalizeHost(form.host),
       clientId: form.clientId.trim(),
-      clientSecret: form.clientSecret.trim(),
+      clientSecret: effectiveSecret,
     });
     if (result.ok) {
       setTest({ status: "valid" });
@@ -139,12 +189,29 @@ export function ConnectionsModal({
         label: form.label.trim(),
         host: normalizeHost(form.host),
         clientId: form.clientId.trim(),
-        clientSecret: form.clientSecret.trim(),
+        clientSecret: effectiveSecret,
       };
       const next = form.id
         ? connections.map((c) => (c.id === form.id ? entry : c))
         : [...connections, entry];
-      await onSave(next);
+
+      // Encrypt every plaintext secret in the list (idempotent — already
+      // encrypted values pass through), so one save also migrates legacy
+      // plaintext connections. Falls back to plaintext when no key is set.
+      const normalized = await Promise.all(
+        next.map(async (connection) =>
+          isEncryptedSecret(connection.clientSecret)
+            ? connection
+            : {
+                ...connection,
+                clientSecret: (
+                  await encryptSecretRemote(connection.clientSecret)
+                ).value,
+              },
+        ),
+      );
+
+      await onSave(normalized);
       setForm(null);
     } finally {
       setSaving(false);
@@ -162,20 +229,36 @@ export function ConnectionsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Environment connections</DialogTitle>
-          <DialogDescription asChild>
-            <div className="space-y-2">
-              <p>
-                Each connection is a SitecoreAI environment host plus the
-                Client ID / Client Secret of an automation client created in
-                SitecoreAI Deploy. Connections are stored in the Sitecore
-                content tree under /sitecore/system/Modules.
-              </p>
-            </div>
-          </DialogDescription>
         </DialogHeader>
+
+        {/* Standalone apps are global: pick which tenant stores the settings */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap gap-2">
+            {tenants.map((tenant) => (
+              <Button
+                key={tenant.tenantId}
+                size="sm"
+                variant={
+                  tenant.tenantId === selectedTenantId ? "default" : "outline"
+                }
+                onClick={() => onTenantChange(tenant.tenantId)}
+                disabled={saving || deletingId !== null || loadingConnections}
+              >
+                {tenant.label}
+              </Button>
+            ))}
+          </div>
+          {tenants.length > 1 && (
+            <p className="text-xs text-text-subtle">
+              This only chooses where connections are stored and which list is
+              edited below — the transfer dropdowns always offer the
+              connections of every environment.
+            </p>
+          )}
+        </div>
 
         <div className="flex items-start gap-2 rounded-lg bg-primary-bg px-3 py-2.5 text-sm text-primary-fg">
           <Icon
@@ -185,13 +268,39 @@ export function ConnectionsModal({
           />
           <p>
             No credential is shared or stored anywhere outside of this
-            Sitecore instance. Connections are kept in this environment&apos;s
-            content tree and only used server-side to call the Sitecore APIs.
+            Sitecore instance.
+            {encryptionConfigured && (
+              <> Client secrets are encrypted at rest.</>
+            )}
           </p>
         </div>
 
+        {encryptionConfigured === false && (
+          <div className="flex items-start gap-2 rounded-lg bg-[#ffe6bd] px-3 py-2.5 text-sm text-[#953d00]">
+            <Icon
+              path={mdiAlertCircle}
+              size={0.8}
+              className="mt-0.5 shrink-0"
+            />
+            <p>
+              No encryption key is configured on the server, so client secrets
+              will be stored <strong>unencrypted</strong> in the content tree.
+              Set the <span className="font-mono">CT_ENCRYPTION_KEY</span>{" "}
+              environment variable and re-save the connections to encrypt
+              them.
+            </p>
+          </div>
+        )}
+
+        {loadingConnections && (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-text-subtle">
+            <Icon path={mdiLoading} className="animate-spin" />
+            Loading connections&hellip;
+          </div>
+        )}
+
         {/* Connection list */}
-        {!form && (
+        {!loadingConnections && !form && (
           <div className="flex flex-col gap-2">
             {connections.map((connection) => (
               <div
@@ -254,7 +363,7 @@ export function ConnectionsModal({
         )}
 
         {/* Add / edit form */}
-        {form && (
+        {!loadingConnections && form && (
           <div className="flex flex-col gap-4">
             {connections.length > 0 && (
               <>
@@ -312,6 +421,19 @@ export function ConnectionsModal({
                 onChange={(e) => updateForm({ clientId: e.target.value })}
                 placeholder="e.g. AbCdEf123..."
               />
+              <p className="text-xs text-text-subtle">
+                SitecoreAI Deploy &gt; Credentials &gt; Environment &gt; Create
+                credentials &gt; Automation.{" "}
+                <a
+                  href="https://deploy.sitecorecloud.io/credentials/environment"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-fg underline hover:text-primary-fg/80"
+                >
+                  Ctrl+click to create credentials
+                </a>
+                .
+              </p>
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="conn-client-secret" className="text-sm font-medium">
@@ -324,6 +446,9 @@ export function ConnectionsModal({
                   value={form.clientSecret}
                   autoComplete="off"
                   onChange={(e) => updateForm({ clientSecret: e.target.value })}
+                  placeholder={
+                    form.id ? "Leave blank to keep the current secret" : ""
+                  }
                   className="pr-10"
                 />
                 <button
@@ -353,7 +478,7 @@ export function ConnectionsModal({
         )}
 
         <DialogFooter>
-          {form ? (
+          {form && !loadingConnections ? (
             <>
               {connections.length > 0 && (
                 <Button

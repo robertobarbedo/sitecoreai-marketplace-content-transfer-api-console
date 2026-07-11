@@ -142,3 +142,38 @@ export async function validateConnection(
     detail: body?.detail,
   };
 }
+
+/** Reports whether the server has an encryption key (CT_ENCRYPTION_KEY). */
+export async function getEncryptionStatus(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/crypto/encrypt");
+    if (!response.ok) return false;
+    const body = (await response.json()) as { configured?: boolean };
+    return body.configured === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Encrypts a secret through the server's encrypt-only route (there is no
+ * decrypt counterpart). Returns the value to store and whether it is
+ * actually encrypted — false means the server has no key configured and the
+ * caller should warn that the secret will be stored as plaintext.
+ */
+export async function encryptSecretRemote(
+  secret: string,
+): Promise<{ value: string; encrypted: boolean }> {
+  const response = await fetch("/api/crypto/encrypt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ secret }),
+  });
+  await throwOnError(response);
+  return (await response.json()) as { value: string; encrypted: boolean };
+}
+
+/** True for values already in the stored-ciphertext format. */
+export function isEncryptedSecret(value: string): boolean {
+  return value.startsWith("enc:v1:");
+}

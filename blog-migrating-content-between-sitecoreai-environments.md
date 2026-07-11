@@ -38,8 +38,7 @@ once: a label, the environment host name, and the client ID and secret.
 
 <!-- Screenshot: Environment connections dialog -->
 
-No credential is shared or stored anywhere outside of your Sitecore instance
-— connections live in the content tree, and tokens never leave the server.
+No credential is shared or stored anywhere outside of your Sitecore instance.
 
 ## The Simple Path: Automatic Content Transfer
 

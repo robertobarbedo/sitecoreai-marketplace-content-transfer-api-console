@@ -1,4 +1,5 @@
 import { getToken, evictToken, InvalidCredentialsError } from "./auth";
+import { decryptSecret } from "./crypto";
 
 /** Base path of the Content Transfer API (v1) on an environment host. */
 export const CONTENT_TRANSFER_BASE = "/sitecore/api/content/transfer/v1";
@@ -58,8 +59,14 @@ export async function transferFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
+  // Stored secrets arrive as `enc:v1:` ciphertext in the headers; they are
+  // decrypted only here, server-side, right before the token exchange
+  // (legacy plaintext passes through unchanged). Throws
+  // SecretDecryptionError on a bad or missing key.
+  const clientSecret = decryptSecret(env.clientSecret);
+
   const attempt = async (): Promise<Response> => {
-    const token = await getToken(env.clientId, env.clientSecret);
+    const token = await getToken(env.clientId, clientSecret);
     try {
       return await fetch(`https://${env.host}${path}`, {
         ...init,
@@ -77,7 +84,7 @@ export async function transferFetch(
   let response = await attempt();
 
   if (response.status === 401 || response.status === 403) {
-    evictToken(env.clientId, env.clientSecret);
+    evictToken(env.clientId, clientSecret);
     response = await attempt();
     if (response.status === 401 || response.status === 403) {
       const detail = await response.text().catch(() => "");

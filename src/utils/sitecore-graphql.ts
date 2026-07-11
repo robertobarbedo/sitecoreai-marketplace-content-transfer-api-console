@@ -4,6 +4,7 @@ import {
   DEFAULT_LANGUAGE,
   type Language,
 } from "@/src/constants";
+import type { TenantInfo } from "@/src/types/transfer";
 
 export interface SitecoreItem {
   itemId: string;
@@ -16,15 +17,35 @@ function escapeGraphQL(str: string): string {
   return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-export async function getSitecoreContextId(
-  client: ClientSDK,
-): Promise<string> {
+/**
+ * Lists the tenants this (standalone, hence org-global) app has access to —
+ * one resourceAccess entry per tenant, each carrying the sitecoreContextId
+ * its authoring GraphQL expects. The user picks which tenant's content tree
+ * stores the console settings.
+ */
+export async function getTenants(client: ClientSDK): Promise<TenantInfo[]> {
   const contextResponse = await client.query("application.context");
   const appContext = contextResponse.data as Record<string, unknown>;
   const resourceAccess = appContext?.resourceAccess as
-    | Array<{ context?: { preview?: string } }>
+    | Array<{
+        tenantId?: string;
+        tenantName?: string;
+        tenantDisplayName?: string;
+        context?: { preview?: string };
+      }>
     | undefined;
-  return resourceAccess?.[0]?.context?.preview ?? "";
+
+  return (resourceAccess ?? [])
+    .filter((resource) => resource.context?.preview)
+    .map((resource, index) => ({
+      tenantId: resource.tenantId ?? resource.context?.preview ?? String(index),
+      label:
+        resource.tenantDisplayName ||
+        resource.tenantName ||
+        resource.tenantId ||
+        `Environment ${index + 1}`,
+      contextId: resource.context?.preview ?? "",
+    }));
 }
 
 export async function queryItemByPath(

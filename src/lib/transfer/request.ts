@@ -9,6 +9,7 @@ import {
   transferFetch,
   type TransferEnvironment,
 } from "./client";
+import { SecretDecryptionError } from "./crypto";
 
 /**
  * Header names carrying the target environment for a proxied call. Routes
@@ -94,6 +95,9 @@ export function transferErrorResponse(error: unknown): NextResponse {
   }
   if (error instanceof UpstreamUnreachableError) {
     return jsonError("upstream_unreachable", 502);
+  }
+  if (error instanceof SecretDecryptionError) {
+    return jsonError("encryption_error", 500, { detail: error.message });
   }
   if (error instanceof TransferApiRequestError) {
     return jsonError("transfer_api_error", error.status, {

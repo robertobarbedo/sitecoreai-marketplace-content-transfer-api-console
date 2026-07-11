@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { mdiCog, mdiLoading } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
@@ -20,13 +20,13 @@ import { MigrationTab } from "@/components/migration/migration-tab";
 import { ItemTransfersTab } from "@/components/item-transfers/item-transfers-tab";
 import { HistoryTab } from "@/components/history/history-tab";
 import { useMarketplaceClient } from "@/src/utils/hooks/useMarketplaceClient";
-import { getSitecoreContextId } from "@/src/utils/sitecore-graphql";
+import { getTenants } from "@/src/utils/sitecore-graphql";
 import {
   loadConsoleSettings,
   saveConsoleSettings,
 } from "@/src/utils/sitecore-settings";
 import { isInvalidCredentialsError } from "@/src/utils/transfer-api";
-import type { EnvironmentConnection } from "@/src/types/transfer";
+import type { EnvironmentConnection, TenantInfo } from "@/src/types/transfer";
 
 type ToastVariant = "default" | "success" | "error" | "warning";
 
@@ -37,12 +37,22 @@ interface ToastState {
   variant: ToastVariant;
 }
 
-export default function FullscreenExtension() {
+/** Remembers the last tenant whose settings the user worked with. */
+const SELECTED_TENANT_KEY = "content-transfer-console.settings-tenant";
+
+export default function StandaloneExtension() {
   const { client, error, isInitialized } = useMarketplaceClient();
 
-  const [contextId, setContextId] = useState<string>("");
-  const [connections, setConnections] = useState<EnvironmentConnection[]>([]);
-  const [loadingSettings, setLoadingSettings] = useState(true);
+  // Standalone extensions are global (not per tenant). The tenant selection
+  // only controls WHERE new settings are saved; the source/destination
+  // dropdowns always list the connections of ALL tenants.
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [connectionsByTenant, setConnectionsByTenant] = useState<
+    Record<string, EnvironmentConnection[]>
+  >({});
+  const [bootstrapped, setBootstrapped] = useState(false);
+
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [sourceId, setSourceId] = useState("");
   const [destinationId, setDestinationId] = useState("");
@@ -59,31 +69,61 @@ export default function FullscreenExtension() {
     [],
   );
 
-  // Once the SDK is up: resolve the context id and load stored connections
+  // Once the SDK is up: list the tenants, restore the last save-target
+  // selection, and load the stored connections of EVERY tenant.
   useEffect(() => {
     if (!isInitialized || !client) return;
 
     let cancelled = false;
     (async () => {
       try {
-        const ctxId = await getSitecoreContextId(client);
+        const list = await getTenants(client);
         if (cancelled) return;
-        setContextId(ctxId);
+        setTenants(list);
 
-        const settings = await loadConsoleSettings(client, ctxId);
+        const stored = window.localStorage.getItem(SELECTED_TENANT_KEY);
+        const initial = list.find((t) => t.tenantId === stored) ?? list[0];
+        if (initial) setSelectedTenantId(initial.tenantId);
+
+        const results = await Promise.allSettled(
+          list.map(async (tenant) => ({
+            tenantId: tenant.tenantId,
+            label: tenant.label,
+            connections: (await loadConsoleSettings(client, tenant.contextId))
+              .connections,
+          })),
+        );
         if (cancelled) return;
-        setConnections(settings.connections);
+
+        const byTenant: Record<string, EnvironmentConnection[]> = {};
+        const failed: string[] = [];
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            byTenant[result.value.tenantId] = result.value.connections;
+          } else {
+            byTenant[list[index].tenantId] = [];
+            failed.push(list[index].label);
+          }
+        });
+        setConnectionsByTenant(byTenant);
+        if (failed.length > 0) {
+          showToast(
+            "Some settings could not be loaded",
+            `Could not read stored connections from: ${failed.join(", ")}.`,
+            "warning",
+          );
+        }
       } catch (err) {
-        console.error("Error loading app context/settings:", err);
+        console.error("Error loading application context/settings:", err);
         if (!cancelled) {
           showToast(
-            "Failed to load settings",
-            "Could not read stored connections from the content tree.",
+            "Failed to load application context",
+            "Could not list the tenants this app has access to.",
             "error",
           );
         }
       } finally {
-        if (!cancelled) setLoadingSettings(false);
+        if (!cancelled) setBootstrapped(true);
       }
     })();
 
@@ -92,24 +132,64 @@ export default function FullscreenExtension() {
     };
   }, [isInitialized, client, showToast]);
 
+  const selectedTenant =
+    tenants.find((t) => t.tenantId === selectedTenantId) ?? null;
+
+  /** Connections stored in the currently selected settings tenant. */
+  const tenantConnections = connectionsByTenant[selectedTenantId] ?? [];
+
+  /**
+   * Every connection across all tenants — what the source/destination
+   * dropdowns offer. Deduped by id (ids are UUIDs, so collisions only happen
+   * if the same list was copied between tenants).
+   */
+  const allConnections = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: EnvironmentConnection[] = [];
+    for (const tenant of tenants) {
+      for (const connection of connectionsByTenant[tenant.tenantId] ?? []) {
+        if (seen.has(connection.id)) continue;
+        seen.add(connection.id);
+        merged.push(connection);
+      }
+    }
+    return merged;
+  }, [tenants, connectionsByTenant]);
+
+  const handleTenantChange = useCallback((tenantId: string) => {
+    try {
+      window.localStorage.setItem(SELECTED_TENANT_KEY, tenantId);
+    } catch {
+      // Remembering the choice is a convenience only.
+    }
+    setSelectedTenantId(tenantId);
+  }, []);
+
   const handleSaveConnections = useCallback(
     async (next: EnvironmentConnection[]) => {
-      if (!client || !contextId) return;
+      if (!client || !selectedTenant) return;
       try {
-        await saveConsoleSettings(client, contextId, next);
-        setConnections(next);
-        showToast("Connections saved", undefined, "success");
+        await saveConsoleSettings(client, selectedTenant.contextId, next);
+        setConnectionsByTenant((prev) => ({
+          ...prev,
+          [selectedTenant.tenantId]: next,
+        }));
+        showToast(
+          "Connections saved",
+          `Stored in ${selectedTenant.label}.`,
+          "success",
+        );
       } catch (err) {
         console.error("Error saving connections:", err);
         showToast(
           "Save failed",
-          "Could not persist the connections to the content tree.",
+          `Could not persist the connections to ${selectedTenant.label}.`,
           "error",
         );
         throw err;
       }
     },
-    [client, contextId, showToast],
+    [client, selectedTenant, showToast],
   );
 
   const handleApiError = useCallback(
@@ -133,8 +213,9 @@ export default function FullscreenExtension() {
     [showToast],
   );
 
-  const source = connections.find((c) => c.id === sourceId) ?? null;
-  const destination = connections.find((c) => c.id === destinationId) ?? null;
+  const source = allConnections.find((c) => c.id === sourceId) ?? null;
+  const destination =
+    allConnections.find((c) => c.id === destinationId) ?? null;
   const pairReady = !!source && !!destination && source.id !== destination.id;
 
   // ---- Render states ----
@@ -155,13 +236,30 @@ export default function FullscreenExtension() {
     );
   }
 
-  if (!isInitialized || loadingSettings) {
+  if (!isInitialized || !bootstrapped) {
     return (
       <main className="p-(--spacing-margin-page) min-h-screen bg-surface-bright">
         <div className="mx-auto flex max-w-[1280px] items-center justify-center py-32">
           <div className="flex items-center gap-3 text-text-subtle">
             <Icon path={mdiLoading} size={1} className="animate-spin" />
             <span>Connecting to Sitecore&hellip;</span>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (tenants.length === 0) {
+    return (
+      <main className="p-(--spacing-margin-page) min-h-screen bg-surface-bright">
+        <div className="mx-auto max-w-[1280px]">
+          <div className="rounded-xl border border-danger bg-danger-bg p-6 text-danger-fg">
+            <h2 className="mb-1 font-bold">No tenant access</h2>
+            <p className="text-sm">
+              This app has no access to any SitecoreAI tenant. Grant the app
+              access to at least one tenant in the Sitecore Cloud Portal, then
+              reload.
+            </p>
           </div>
         </div>
       </main>
@@ -180,6 +278,13 @@ export default function FullscreenExtension() {
               <p className="text-[11px] text-text-subtle">
                 Transfer content and media between SitecoreAI environments with
                 the Content Transfer and Item Transfer APIs.
+                {selectedTenant && (
+                  <>
+                    {" "}
+                    New settings stored in{" "}
+                    <strong>{selectedTenant.label}</strong>.
+                  </>
+                )}
               </p>
             </div>
             <Button
@@ -192,12 +297,12 @@ export default function FullscreenExtension() {
             </Button>
           </header>
 
-          {connections.length === 0 ? (
+          {allConnections.length === 0 ? (
             <ConnectionGate onConfigure={() => setConnectionsOpen(true)} />
           ) : (
             <>
               <EnvironmentPicker
-                connections={connections}
+                connections={allConnections}
                 sourceId={sourceId}
                 destinationId={destinationId}
                 onSourceChange={setSourceId}
@@ -271,8 +376,11 @@ export default function FullscreenExtension() {
           <ConnectionsModal
             open={connectionsOpen}
             onOpenChange={setConnectionsOpen}
-            connections={connections}
+            connections={tenantConnections}
             onSave={handleSaveConnections}
+            tenants={tenants}
+            selectedTenantId={selectedTenantId}
+            onTenantChange={handleTenantChange}
           />
         </div>
       </main>

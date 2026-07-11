@@ -33,9 +33,16 @@ export const MODULES_PARENT_ID = "{08477468-D438-43D4-9D6A-6D84A611971C}";
  * Content tree paths where this app persists its settings
  */
 export const SETTINGS_PATHS = {
-  MODULE_FOLDER: "/sitecore/system/Modules/ContentTransferConsole",
-  SETTINGS_ITEM: "/sitecore/system/Modules/ContentTransferConsole/Settings",
+  MARKETPLACE_FOLDER: "/sitecore/system/Modules/Marketplace",
+  MODULE_FOLDER: "/sitecore/system/Modules/Marketplace/ContentTransferConsole",
+  SETTINGS_ITEM:
+    "/sitecore/system/Modules/Marketplace/ContentTransferConsole/Settings",
 } as const;
 
+/** Settings item location before the move under the Marketplace folder. */
+export const LEGACY_SETTINGS_ITEM_PATH =
+  "/sitecore/system/Modules/ContentTransferConsole/Settings";
+
+export const MARKETPLACE_FOLDER_NAME = "Marketplace";
 export const MODULE_FOLDER_NAME = "ContentTransferConsole";
 export const SETTINGS_ITEM_NAME = "Settings";

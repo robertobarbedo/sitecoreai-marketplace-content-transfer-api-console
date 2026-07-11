@@ -4,6 +4,19 @@
  */
 
 // ---------------------------------------------------------------------------
+// Marketplace tenants (standalone extension: the app is global, so the user
+// picks which tenant's content tree stores the settings)
+// ---------------------------------------------------------------------------
+
+export interface TenantInfo {
+  tenantId: string;
+  /** Display label shown on the tenant buttons. */
+  label: string;
+  /** sitecoreContextId used by the authoring GraphQL for this tenant. */
+  contextId: string;
+}
+
+// ---------------------------------------------------------------------------
 // Environment connections (stored in the content tree, selected in the UI)
 // ---------------------------------------------------------------------------
 
@@ -230,7 +243,8 @@ export interface TransferApiError {
     | "invalid_credentials"
     | "validation"
     | "transfer_api_error"
-    | "upstream_unreachable";
+    | "upstream_unreachable"
+    | "encryption_error";
   status?: number;
   field?: string;
   detail?: string;
