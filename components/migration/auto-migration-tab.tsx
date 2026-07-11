@@ -9,6 +9,7 @@ import {
   mdiFileTree,
   mdiRocketLaunch,
   mdiStop,
+  mdiArrowRightBold,
 } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { cn } from "@/lib/utils";
@@ -128,11 +129,7 @@ export function AutoMigrationTab({
     <div className="flex flex-col gap-4">
       <Card style="outline" padding="md">
         <CardHeader>
-          <div className="flex flex-wrap items-center gap-2">
-            <CardTitle>Automatic content transfer</CardTitle>
-            <EnvBadge env="source" name={source.label} />
-            <EnvBadge env="destination" name={destination.label} />
-          </div>
+          <CardTitle>Automatic content transfer</CardTitle>
           <CardDescription className="text-muted-foreground">
             Pick one content tree path and how to merge it — the transfer,
             chunk copying, .raif generation, consumption into the destination
@@ -218,16 +215,47 @@ export function AutoMigrationTab({
             </p>
           )}
 
-          <div className="flex items-center gap-3">
+          {/* Transfer direction, using the source/destination color code */}
+          <div className="flex flex-wrap items-center justify-center gap-3 py-1">
+            <div className="flex min-w-28 flex-col items-center rounded-lg border border-[#003767]/15 bg-[#c6f1ff] px-4 py-1.5">
+              <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-[#003767]/70">
+                Source
+              </span>
+              <span
+                className="max-w-44 truncate text-xs font-bold text-[#003767]"
+                title={source.host}
+              >
+                {source.label}
+              </span>
+            </div>
+            <Icon
+              path={mdiArrowRightBold}
+              size={0.9}
+              className="shrink-0 text-text-subtle"
+            />
+            <div className="flex min-w-28 flex-col items-center rounded-lg border border-success/20 bg-success-bg px-4 py-1.5">
+              <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-success-fg/70">
+                Destination
+              </span>
+              <span
+                className="max-w-44 truncate text-xs font-bold text-success-fg"
+                title={destination.host}
+              >
+                {destination.label}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-2">
             {running ? (
               <Button variant="outline" colorScheme="danger" onClick={cancel}>
                 <Icon path={mdiStop} />
-                Cancel transfer 
+                Cancel transfer
               </Button>
             ) : (
               <Button onClick={handleStart} disabled={!canStart}>
                 <Icon path={mdiRocketLaunch} />
-                Start transfer 
+                Start transfer
               </Button>
             )}
             {!pathValid && itemPath.trim() !== "" && (
