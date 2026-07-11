@@ -278,13 +278,6 @@ export default function StandaloneExtension() {
               <p className="text-[11px] text-text-subtle">
                 Transfer content and media between SitecoreAI environments with
                 the Content Transfer and Item Transfer APIs.
-                {selectedTenant && (
-                  <>
-                    {" "}
-                    New settings stored in{" "}
-                    <strong>{selectedTenant.label}</strong>.
-                  </>
-                )}
               </p>
             </div>
             <Button
