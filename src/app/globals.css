@@ -123,6 +123,12 @@
 }
 
 @layer base {
+  html {
+    /* Reserve space for the vertical scrollbar so taller tabs (e.g.
+       Advanced) don't shift the centered layout when it appears. */
+    scrollbar-gutter: stable;
+  }
+
   body {
     font-family: var(--font-family-sans);
     background-color: var(--color-surface);

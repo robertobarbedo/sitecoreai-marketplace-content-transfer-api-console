@@ -86,3 +86,40 @@ attempt runtime testing.** Verification is limited to:
   unset, serialized as the .NET minimum date `0001-01-01T00:00:00`. The
   history tab falls back to the Finished event's timestamp, and the shared
   `formatDate` renders year-1 dates as "—".
+- The **Saved Transfers** tab stores reusable transfer definitions
+  (`SavedTransfer` in types/transfer.ts: name, source/destination connection
+  ids + labels, DataTrees, reconcile flag) as one JSON list in a
+  `SavedTransfers` settings item next to the connections Settings item.
+  **Saves always write to the FIRST tenant in the resource list; loads merge
+  the item from every tenant** (dedupe by id, earlier tenant wins) because a
+  different tenant may have been first in the past. Executing reuses
+  `useAutoMigration` (whose input is now `{ dataTrees: DataTree[] }` — the
+  Content Transfer tab passes a single-tree array) and, when "Reconcile at
+  the end" is set, chains a reconciliation apply against the **destination**
+  environment via the shared engine in `src/utils/reconciliation-apply.ts`
+  (plan → fetch current values → execute; also used by the Reconciliation
+  tab's ApplyView). The destination connection is mapped to its SitecoreAI
+  tenant at execution time by tenantName-substring-of-host, falling back to
+  a label match — an unmatched destination fails the reconcile step with an
+  explicit error (the transfer itself still completes).
+  Its TabsContent is `forceMount`ed like the transfer tab so switching tabs
+  doesn't kill a running execution. Tab labels: the automatic transfer tab is
+  displayed as **Quick Transfer**, the "Item transfers" tab as **Transfer
+  Details History** and the history tab as **Transfer Timeline** (values
+  `transfer`/`item-transfers`/`history` unchanged).
+- The **Reconciliation** tab is a read-only integration with the sibling
+  `sitecoreai-marketplace-content-reconciliation` app: on open it checks every
+  environment (Marketplace SDK authoring GraphQL, not the stored connections)
+  for that app's `Base`/`Secondary` marker items under
+  `/sitecore/system/Modules/Marketplace/ContentReconciliation`. Missing
+  markers / no base / multiple bases ⇒ a status screen telling the user to
+  install/set up the Content Reconciliation app; exactly one Base ⇒ it loads
+  that app's `Data` blob and renders a port of its "Preview and apply
+  changes" view (`components/reconciliation/apply-view.tsx`). Keep the port's
+  invariants from the source app: desired values are keyed by **tenantName**
+  (`storedKeyFor`), the GraphQL escaping includes `\n`/`\r`/`\t` (user-typed
+  values), and Apply re-fetches the item and passes `max(versions)` right
+  before each `updateItem` batch. This tab never creates/repairs the
+  reconciliation storage items — that's the other app's job. Types/blob shape
+  live in `src/types/reconciliation.ts` and must stay in sync with the
+  sibling app.

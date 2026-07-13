@@ -19,6 +19,8 @@ import { AutoMigrationTab } from "@/components/migration/auto-migration-tab";
 import { MigrationTab } from "@/components/migration/migration-tab";
 import { ItemTransfersTab } from "@/components/item-transfers/item-transfers-tab";
 import { HistoryTab } from "@/components/history/history-tab";
+import { ReconciliationTab } from "@/components/reconciliation/reconciliation-tab";
+import { SavedTransfersTab } from "@/components/saved-transfers/saved-transfers-tab";
 import { useMarketplaceClient } from "@/src/utils/hooks/useMarketplaceClient";
 import { getTenants } from "@/src/utils/sitecore-graphql";
 import {
@@ -56,6 +58,11 @@ export default function StandaloneExtension() {
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [sourceId, setSourceId] = useState("");
   const [destinationId, setDestinationId] = useState("");
+  // While a transfer pipeline runs (Quick Transfer or an executing saved
+  // transfer), the whole interface locks — only its Cancel button stays live.
+  const [quickRunning, setQuickRunning] = useState(false);
+  const [savedRunning, setSavedRunning] = useState(false);
+  const transferRunning = quickRunning || savedRunning;
   const [toast, setToast] = useState<ToastState>({
     open: false,
     title: "",
@@ -271,19 +278,30 @@ export default function StandaloneExtension() {
       <main className="p-(--spacing-margin-page) min-h-screen bg-surface-bright">
         <div className="mx-auto max-w-[1280px] space-y-5">
           <header className="flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-bold text-on-surface">
-                Content Transfer Console
-              </h1>
-              <p className="text-[11px] text-text-subtle">
-                Transfer content and media between SitecoreAI environments with
-                the Content Transfer and Item Transfer APIs.
-              </p>
+            <div className="flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icon.svg"
+                alt="Content Transfer Console"
+                width={40}
+                height={40}
+                className="shrink-0"
+              />
+              <div>
+                <h1 className="text-lg font-bold text-on-surface">
+                  Content Transfer Console
+                </h1>
+                <p className="text-[11px] text-text-subtle">
+                  Transfer content and media between SitecoreAI environments with
+                  the Content Transfer and Item Transfer APIs.
+                </p>
+              </div>
             </div>
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setConnectionsOpen(true)}
+              disabled={transferRunning}
               aria-label="Manage environment connections"
             >
               <Icon path={mdiCog} />
@@ -300,16 +318,29 @@ export default function StandaloneExtension() {
                 destinationId={destinationId}
                 onSourceChange={setSourceId}
                 onDestinationChange={setDestinationId}
+                disabled={transferRunning}
               />
 
               <Tabs defaultValue="transfer">
                 <TabsList>
-                  <TabsTrigger value="transfer">Content Transfer</TabsTrigger>
-                  <TabsTrigger value="advanced">Advanced</TabsTrigger>
-                  <TabsTrigger value="item-transfers">
-                    Item transfers
+                  <TabsTrigger value="transfer" disabled={transferRunning}>
+                    Quick Transfer
                   </TabsTrigger>
-                  <TabsTrigger value="history">History</TabsTrigger>
+                  <TabsTrigger value="saved" disabled={transferRunning}>
+                    Saved Transfers
+                  </TabsTrigger>
+                  <TabsTrigger value="reconciliation" disabled={transferRunning}>
+                    Reconciliation
+                  </TabsTrigger>
+                  <TabsTrigger value="advanced" disabled={transferRunning}>
+                    Advanced
+                  </TabsTrigger>
+                  <TabsTrigger value="item-transfers" disabled={transferRunning}>
+                    Transfer Details History
+                  </TabsTrigger>
+                  <TabsTrigger value="history" disabled={transferRunning}>
+                    Transfer Timeline
+                  </TabsTrigger>
                 </TabsList>
                 {/* forceMount keeps a running automatic migration alive when
                     the user switches tabs (Radix hides it via `hidden`). */}
@@ -321,6 +352,7 @@ export default function StandaloneExtension() {
                       destination={destination}
                       onError={handleApiError}
                       showToast={showToast}
+                      onRunningChange={setQuickRunning}
                     />
                   ) : (
                     <SelectionHint text="Select a source and a (different) destination environment above to start a migration." />
@@ -361,6 +393,26 @@ export default function StandaloneExtension() {
                   ) : (
                     <SelectionHint text="Select a destination environment above to inspect its consumption history." />
                   )}
+                </TabsContent>
+                {/* forceMount so switching tabs doesn't kill an executing
+                    saved transfer (same reason as the transfer tab). */}
+                <TabsContent value="saved" forceMount>
+                  {client && (
+                    <SavedTransfersTab
+                      client={client}
+                      tenants={tenants}
+                      connections={allConnections}
+                      onError={handleApiError}
+                      showToast={showToast}
+                      onRunningChange={setSavedRunning}
+                    />
+                  )}
+                </TabsContent>
+                {/* The reconciliation tab talks to the environments via the
+                    Marketplace SDK (authoring GraphQL), not the stored
+                    connections — no source/destination selection needed. */}
+                <TabsContent value="reconciliation">
+                  {client && <ReconciliationTab client={client} />}
                 </TabsContent>
               </Tabs>
             </>

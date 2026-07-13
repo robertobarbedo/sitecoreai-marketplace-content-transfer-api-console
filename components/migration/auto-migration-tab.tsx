@@ -7,7 +7,6 @@ import {
   mdiAlertCircle,
   mdiLoading,
   mdiFileTree,
-  mdiRocketLaunch,
   mdiStop,
   mdiArrowRightBold,
 } from "@mdi/js";
@@ -69,6 +68,8 @@ interface AutoMigrationTabProps {
     description?: string,
     variant?: "default" | "success" | "error" | "warning",
   ) => void;
+  /** Reports the pipeline state so the page can lock the rest of the UI. */
+  onRunningChange?: (running: boolean) => void;
 }
 
 export function AutoMigrationTab({
@@ -76,9 +77,15 @@ export function AutoMigrationTab({
   destination,
   onError,
   showToast,
+  onRunningChange,
 }: AutoMigrationTabProps) {
   const { state, running, progressByChunkSet, start, cancel, reset } =
     useAutoMigration(source, destination);
+
+  useEffect(() => {
+    onRunningChange?.(running);
+    return () => onRunningChange?.(false);
+  }, [running, onRunningChange]);
 
   const [itemPath, setItemPath] = useState("");
   const [scope, setScope] = useState<DataTreeScope>("SingleItem");
@@ -114,7 +121,11 @@ export function AutoMigrationTab({
 
   const beginMigration = () => {
     reset();
-    start({ itemPath: itemPath.trim(), scope, mergeStrategy });
+    start({
+      dataTrees: [
+        { ItemPath: itemPath.trim(), Scope: scope, MergeStrategy: mergeStrategy },
+      ],
+    });
   };
 
   const handleStart = () => {
@@ -254,7 +265,6 @@ export function AutoMigrationTab({
               </Button>
             ) : (
               <Button onClick={handleStart} disabled={!canStart}>
-                <Icon path={mdiRocketLaunch} />
                 Start transfer
               </Button>
             )}
@@ -339,7 +349,8 @@ export function AutoMigrationTab({
   );
 }
 
-function StageRow({
+/** One row of the pipeline checklist — also used by the Saved Transfers tab. */
+export function StageRow({
   stage,
   state,
   progressByChunkSet,

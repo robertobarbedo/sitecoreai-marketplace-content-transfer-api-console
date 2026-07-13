@@ -33,6 +33,35 @@ export interface EnvironmentConnection {
 }
 
 // ---------------------------------------------------------------------------
+// Saved transfers (stored in the content tree next to the settings)
+// ---------------------------------------------------------------------------
+
+/**
+ * A reusable transfer definition: source/destination connection, the data
+ * trees to move, and optionally a reconciliation run at the end. Persisted as
+ * a JSON list in the SavedTransfers item of the module folder.
+ */
+export interface SavedTransfer {
+  /** Stable identifier generated when the saved transfer is created. */
+  id: string;
+  name: string;
+  /** References into the stored connections list (EnvironmentConnection.id). */
+  sourceConnectionId: string;
+  destinationConnectionId: string;
+  /** Labels at save time — shown when the referenced connection is gone. */
+  sourceLabel: string;
+  destinationLabel: string;
+  dataTrees: DataTree[];
+  /**
+   * Apply the Content Reconciliation values to the DESTINATION environment
+   * after the transfer finishes (the matching tenant is resolved from the
+   * destination connection at execution time).
+   */
+  reconcile: boolean;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Content Transfer API (source → destination chunk streaming)
 // ---------------------------------------------------------------------------
 

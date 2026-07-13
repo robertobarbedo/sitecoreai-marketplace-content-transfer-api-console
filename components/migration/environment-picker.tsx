@@ -17,6 +17,8 @@ interface EnvironmentPickerProps {
   destinationId: string;
   onSourceChange: (id: string) => void;
   onDestinationChange: (id: string) => void;
+  /** Locks both selects (e.g. while a transfer is running). */
+  disabled?: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export function EnvironmentPicker({
   destinationId,
   onSourceChange,
   onDestinationChange,
+  disabled = false,
 }: EnvironmentPickerProps) {
   const same = sourceId !== "" && sourceId === destinationId;
 
@@ -39,8 +42,8 @@ export function EnvironmentPicker({
           <label className="text-xs font-bold uppercase tracking-wider text-[#003767]">
             Source environment
           </label>
-          <Select value={sourceId} onValueChange={onSourceChange}>
-            <SelectTrigger className="w-full">
+          <Select value={sourceId} onValueChange={onSourceChange} disabled={disabled}>
+            <SelectTrigger className="w-full disabled:cursor-not-allowed disabled:opacity-50">
               <SelectValue placeholder="Select the environment to transfer from" />
             </SelectTrigger>
             <SelectContent>
@@ -61,8 +64,12 @@ export function EnvironmentPicker({
           <label className="text-xs font-bold uppercase tracking-wider text-success-fg">
             Destination environment
           </label>
-          <Select value={destinationId} onValueChange={onDestinationChange}>
-            <SelectTrigger className="w-full">
+          <Select
+            value={destinationId}
+            onValueChange={onDestinationChange}
+            disabled={disabled}
+          >
+            <SelectTrigger className="w-full disabled:cursor-not-allowed disabled:opacity-50">
               <SelectValue placeholder="Select the environment to transfer to" />
             </SelectTrigger>
             <SelectContent>

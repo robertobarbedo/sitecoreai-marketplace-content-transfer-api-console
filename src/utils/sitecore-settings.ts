@@ -96,7 +96,7 @@ export async function loadConsoleSettings(
 }
 
 /** Ensures a folder item exists, creating it under `parentId` if missing. */
-async function ensureFolder(
+export async function ensureFolder(
   client: ClientSDK,
   sitecoreContextId: string,
   path: string,

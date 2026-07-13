@@ -14,11 +14,10 @@ import type {
   CompleteChunkSetResult,
   ContentTransferStatus,
   CreateTransferInput,
-  DataTreeScope,
+  DataTree,
   EnvironmentConnection,
   ItemTransfersPage,
   ItemTransferState,
-  MergeStrategy,
   StartItemTransferResult,
 } from "@/src/types/transfer";
 
@@ -48,9 +47,8 @@ export const AUTO_MIGRATION_STAGES: Exclude<
 >[] = ["create", "snapshot", "copy", "complete", "consume", "cleanup"];
 
 export interface AutoMigrationInput {
-  itemPath: string;
-  scope: DataTreeScope;
-  mergeStrategy: MergeStrategy;
+  /** One or more content trees to move in a single transfer operation. */
+  dataTrees: DataTree[];
 }
 
 export interface ConsumptionProgress {
@@ -154,13 +152,10 @@ export function useAutoMigration(
           TransferId: transferId,
           Configuration: {
             Database: DATABASE,
-            DataTrees: [
-              {
-                ItemPath: input.itemPath.trim(),
-                Scope: input.scope,
-                MergeStrategy: input.mergeStrategy,
-              },
-            ],
+            DataTrees: input.dataTrees.map((tree) => ({
+              ...tree,
+              ItemPath: tree.ItemPath.trim(),
+            })),
           },
         };
         await callTransferApi(source, "/api/transfer/transfers", {
