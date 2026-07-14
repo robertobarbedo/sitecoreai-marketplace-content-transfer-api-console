@@ -13,8 +13,8 @@ import {
   mdiPlus,
   mdiPublish,
   mdiRefresh,
+  mdiSquareEditOutline,
   mdiStop,
-  mdiSync,
 } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
@@ -1202,7 +1202,7 @@ function ExecuteSavedTransfer({
         <Card style="outline" padding="md">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Icon path={mdiSync} size={0.8} />
+              <Icon path={mdiSquareEditOutline} size={0.8} />
               Reconciliation — {destination.label}
             </CardTitle>
           </CardHeader>
