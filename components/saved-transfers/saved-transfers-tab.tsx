@@ -11,6 +11,7 @@ import {
   mdiPencil,
   mdiPlaylistPlus,
   mdiPlus,
+  mdiPublish,
   mdiRefresh,
   mdiStop,
   mdiSync,
@@ -32,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StateBadge } from "@/components/badges";
 import { ConfirmDestructiveDialog } from "@/components/confirm-destructive-dialog";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
 import {
@@ -50,11 +52,19 @@ import {
 } from "@/src/utils/saved-transfers-store";
 import {
   detectReconciliationMarkers,
-  environmentLabel,
   getReconciliationEnvironments,
   isReconciliationReady,
   loadReconciliationData,
+  matchEnvironmentToConnection,
 } from "@/src/utils/reconciliation";
+import {
+  fetchPublishJobs,
+  getEnvironmentLanguages,
+  startPublish,
+  watchPublishJobs,
+  type PublishJobInfo,
+  type PublishRequestRow,
+} from "@/src/utils/publish";
 import { cn } from "@/lib/utils";
 import {
   planApplyRows,
@@ -67,6 +77,8 @@ import type {
   DataTreeScope,
   EnvironmentConnection,
   MergeStrategy,
+  PublishMode,
+  PublishTarget,
   SavedTransfer,
   TenantInfo,
 } from "@/src/types/transfer";
@@ -76,6 +88,16 @@ const DEFAULT_TREE: DataTree = {
   Scope: "SingleItem",
   MergeStrategy: "OverrideExistingItem",
 };
+
+const PUBLISH_TARGETS: { value: PublishTarget; label: string }[] = [
+  { value: "TransferredPaths", label: "Only transferred paths" },
+  { value: "EntireTree", label: "Publish entire content tree" },
+];
+
+const PUBLISH_MODES: { value: PublishMode; label: string }[] = [
+  { value: "SMART", label: "Smart" },
+  { value: "FULL", label: "Republish" },
+];
 
 type ToastVariant = "default" | "success" | "error" | "warning";
 
@@ -268,7 +290,7 @@ export function SavedTransfersTab({
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-border-muted bg-surface-grey">
-                  {["Name", "Source → Destination", "Paths", "Reconcile", "Actions"].map(
+                  {["Name", "Source → Destination", "Paths", "Reconcile", "Publish", "Actions"].map(
                     (h) => (
                       <th
                         key={h}
@@ -325,6 +347,23 @@ export function SavedTransfersTab({
                         {transfer.reconcile ? (
                           <span className="whitespace-nowrap rounded-full bg-primary-bg px-2 py-0.5 text-xs font-semibold text-primary-fg">
                             {destination?.label ?? transfer.destinationLabel}
+                          </span>
+                        ) : (
+                          <span className="text-text-subtle">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {transfer.publish ? (
+                          <span className="whitespace-nowrap rounded-full bg-primary-bg px-2 py-0.5 text-xs font-semibold text-primary-fg">
+                            {
+                              PUBLISH_MODES.find(
+                                (m) => m.value === transfer.publish?.mode,
+                              )?.label
+                            }
+                            {" · "}
+                            {transfer.publish.target === "EntireTree"
+                              ? "entire tree"
+                              : "transferred paths"}
                           </span>
                         ) : (
                           <span className="text-text-subtle">—</span>
@@ -435,6 +474,13 @@ function SavedTransferForm({
     editing?.dataTrees.length ? editing.dataTrees.map((t) => ({ ...t })) : [{ ...DEFAULT_TREE }],
   );
   const [reconcile, setReconcile] = useState(editing?.reconcile ?? false);
+  const [publishAtEnd, setPublishAtEnd] = useState(!!editing?.publish);
+  const [publishTarget, setPublishTarget] = useState<PublishTarget>(
+    editing?.publish?.target ?? "EntireTree",
+  );
+  const [publishMode, setPublishMode] = useState<PublishMode>(
+    editing?.publish?.mode ?? "SMART",
+  );
   /** null = still checking. */
   const [reconReady, setReconReady] = useState<boolean | null>(null);
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
@@ -491,6 +537,9 @@ function SavedTransferForm({
         destinationLabel: destination.label,
         dataTrees: trees.map((t) => ({ ...t, ItemPath: t.ItemPath.trim() })),
         reconcile,
+        publish: publishAtEnd
+          ? { target: publishTarget, mode: publishMode }
+          : undefined,
         updatedAt: new Date().toISOString(),
       });
     } finally {
@@ -691,6 +740,71 @@ function SavedTransferForm({
           )}
         </div>
 
+        <div className="flex flex-col gap-2 rounded-lg border border-border-muted p-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={publishAtEnd}
+                onChange={(e) => setPublishAtEnd(e.target.checked)}
+              />
+              Publish at the end
+            </label>
+            <span className="text-xs text-text-subtle">
+              After the transfer (and the reconciliation, when enabled)
+              succeed, the destination environment is published to Experience
+              Edge. Related items are never included.
+            </span>
+          </div>
+          {publishAtEnd && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">What to publish</label>
+                <Select
+                  value={publishTarget}
+                  onValueChange={(value) =>
+                    setPublishTarget(value as PublishTarget)
+                  }
+                >
+                  <SelectTrigger className="w-60" aria-label="What to publish">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PUBLISH_TARGETS.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">Publish mode</label>
+                <Select
+                  value={publishMode}
+                  onValueChange={(value) => setPublishMode(value as PublishMode)}
+                >
+                  <SelectTrigger className="w-44" aria-label="Publish mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PUBLISH_MODES.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <span className="pb-2 text-xs text-text-subtle">
+                {publishTarget === "EntireTree"
+                  ? "One publish of /sitecore, including subitems."
+                  : "One publish per configured path, including subitems."}
+              </span>
+            </div>
+          )}
+        </div>
+
         <div className="flex gap-2">
           <Button onClick={handleSave} disabled={!valid || saving}>
             <Icon path={saving ? mdiLoading : mdiContentSave} className={saving ? "animate-spin" : ""} />
@@ -725,6 +839,9 @@ function SavedTransferForm({
 
 type ReconcilePhase = "idle" | "running" | "done" | "failed";
 
+/** skipped = the reconcile step failed, so nothing was published. */
+type PublishPhase = "idle" | "running" | "done" | "failed" | "skipped";
+
 function ExecuteSavedTransfer({
   client,
   transfer,
@@ -754,6 +871,22 @@ function ExecuteSavedTransfer({
   const [reconRows, setReconRows] = useState<ApplyRow[]>([]);
   const [reconError, setReconError] = useState("");
 
+  const [publishPhase, setPublishPhase] = useState<PublishPhase>("idle");
+  const [publishRows, setPublishRows] = useState<PublishRequestRow[]>([]);
+  const [publishJobs, setPublishJobs] = useState<PublishJobInfo[]>([]);
+  const [publishError, setPublishError] = useState("");
+  /** Non-fatal notes: languages fallback, unobservable jobs, timeout. */
+  const [publishNote, setPublishNote] = useState("");
+
+  // Publishing polls the destination's jobs; stop when the view unmounts.
+  const activeRef = useRef(true);
+  useEffect(() => {
+    activeRef.current = true;
+    return () => {
+      activeRef.current = false;
+    };
+  }, []);
+
   // Auto-start once, deferred a tick: React StrictMode (dev) runs mount →
   // cleanup → mount, and the hook's unmount cleanup flags the run as
   // cancelled — starting synchronously in the first effect pass would abort
@@ -768,6 +901,131 @@ function ExecuteSavedTransfer({
     return () => clearTimeout(timer);
   }, [start, transfer]);
 
+  const runPublish = useCallback(async () => {
+    const publish = transfer.publish;
+    if (!publish) return;
+    setPublishPhase("running");
+    setPublishError("");
+    try {
+      // The publish always targets the DESTINATION environment, resolved to
+      // its SitecoreAI tenant the same way the reconcile step resolves it.
+      const envs = await getReconciliationEnvironments(client);
+      const target = matchEnvironmentToConnection(envs, destination);
+      if (!target) {
+        throw new Error(
+          `Could not match the destination environment (${destination.label}, ${destination.host}) to any SitecoreAI environment this app can access — publishing needs the matching environment's authoring GraphQL.`,
+        );
+      }
+
+      let languages: string[];
+      let note = "";
+      try {
+        languages = await getEnvironmentLanguages(client, target.contextId);
+        if (languages.length === 0) throw new Error("No languages returned");
+      } catch {
+        languages = ["en"];
+        note =
+          "The destination's languages could not be read — publishing \"en\" only.";
+      }
+      setPublishNote(note);
+
+      const paths =
+        publish.target === "EntireTree"
+          ? ["/sitecore"]
+          : [...new Set(transfer.dataTrees.map((t) => t.ItemPath))];
+
+      // Snapshot the jobs BEFORE firing, so ours are the ones that appear.
+      const baseline = new Set(
+        (await fetchPublishJobs(client, target.contextId).catch(() => [])).map(
+          (job) => job.handle,
+        ),
+      );
+
+      const rows: PublishRequestRow[] = [];
+      for (const path of paths) {
+        try {
+          const operationId = await startPublish(client, target.contextId, {
+            rootItemPath: path,
+            mode: publish.mode,
+            languages,
+            displayName: `Content Transfer Console: ${transfer.name} — ${path}`,
+          });
+          rows.push({ path, operationId });
+        } catch (error) {
+          rows.push({
+            path,
+            operationId: null,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        setPublishRows([...rows]);
+      }
+
+      const failedRows = rows.filter((r) => r.operationId === null);
+      if (failedRows.length === rows.length) {
+        throw new Error(
+          failedRows[0]?.error ?? "No publish operation could be started.",
+        );
+      }
+
+      const watch = await watchPublishJobs(
+        client,
+        target.contextId,
+        baseline,
+        rows.length - failedRows.length,
+        setPublishJobs,
+        () => activeRef.current,
+      );
+      if (!activeRef.current) return;
+
+      if (!watch.identified) {
+        setPublishNote((prev) =>
+          [
+            prev,
+            "The publish operation was queued, but its job did not show up in the destination's job list — check the publishing dashboard for progress.",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      } else if (watch.timedOut) {
+        setPublishNote((prev) =>
+          [
+            prev,
+            "Stopped watching after 10 minutes — the publishing job(s) are still running on the destination.",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
+      setPublishPhase("done");
+
+      const failedJobs = watch.jobs.filter((j) => j.jobState === "Failed");
+      if (failedRows.length > 0 || failedJobs.length > 0) {
+        showToast(
+          "Transfer complete, publishing had failures",
+          `${failedRows.length + failedJobs.length} publish operation(s) failed on ${destination.label}.`,
+          "warning",
+        );
+      } else {
+        showToast(
+          "Transfer and publish complete",
+          watch.identified
+            ? `${watch.jobs.length} publishing job(s) finished on ${destination.label}.`
+            : `The publish was queued on ${destination.label}.`,
+          "success",
+        );
+      }
+    } catch (error) {
+      setPublishError(error instanceof Error ? error.message : String(error));
+      setPublishPhase("failed");
+      showToast(
+        "Transfer complete, publishing failed",
+        error instanceof Error ? error.message : String(error),
+        "warning",
+      );
+    }
+  }, [client, destination, transfer, showToast]);
+
   const runReconcile = useCallback(async () => {
     setReconPhase("running");
     setReconError("");
@@ -777,16 +1035,7 @@ function ExecuteSavedTransfer({
       // needs the matching SitecoreAI tenant, so resolve it: XM Cloud hosts
       // embed the tenantName; fall back to a label match.
       const envs = await getReconciliationEnvironments(client);
-      const host = destination.host.toLowerCase();
-      const target =
-        envs.find(
-          (e) => e.tenantName && host.includes(e.tenantName.toLowerCase()),
-        ) ??
-        envs.find(
-          (e) =>
-            environmentLabel(e).toLowerCase() ===
-            destination.label.trim().toLowerCase(),
-        );
+      const target = matchEnvironmentToConnection(envs, destination);
       if (!target) {
         throw new Error(
           `Could not match the destination environment (${destination.label}, ${destination.host}) to any SitecoreAI environment this app can access — reconciliation needs the matching environment's authoring GraphQL.`,
@@ -826,21 +1075,25 @@ function ExecuteSavedTransfer({
           `${updatedCount} field value(s) applied, ${failedCount} failed.`,
           "warning",
         );
+        // Don't push known-wrong values to Edge.
+        if (transfer.publish) setPublishPhase("skipped");
       } else {
         showToast(
           "Transfer and reconciliation complete",
           `${updatedCount} field value(s) applied to ${destination.label}.`,
           "success",
         );
+        if (transfer.publish) runPublish();
       }
     } catch (error) {
       setReconProgress("");
       setReconError(error instanceof Error ? error.message : String(error));
       setReconPhase("failed");
+      if (transfer.publish) setPublishPhase("skipped");
     }
-  }, [client, destination, showToast]);
+  }, [client, destination, transfer, runPublish, showToast]);
 
-  // Surface terminal transitions once; chain the reconciliation on success.
+  // Surface terminal transitions once; chain reconciliation, then publish.
   const reportedStageRef = useRef(state.stage);
   useEffect(() => {
     if (state.stage === reportedStageRef.current) return;
@@ -848,6 +1101,8 @@ function ExecuteSavedTransfer({
     if (state.stage === "done") {
       if (transfer.reconcile) {
         runReconcile();
+      } else if (transfer.publish) {
+        runPublish();
       } else {
         showToast(
           "Transfer complete",
@@ -864,7 +1119,8 @@ function ExecuteSavedTransfer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.stage]);
 
-  const busy = running || reconPhase === "running";
+  const busy =
+    running || reconPhase === "running" || publishPhase === "running";
   const reconUpdated = reconRows.filter((r) => r.status === "updated");
   const reconFailed = reconRows.filter((r) => r.status === "failed");
 
@@ -884,6 +1140,7 @@ function ExecuteSavedTransfer({
             {source.label} → {destination.label} · {transfer.dataTrees.length}{" "}
             path{transfer.dataTrees.length === 1 ? "" : "s"}
             {transfer.reconcile && " · reconcile at the end"}
+            {transfer.publish && " · publish at the end"}
           </p>
         </div>
         {running ? (
@@ -932,7 +1189,7 @@ function ExecuteSavedTransfer({
               </p>
             </div>
           )}
-          {state.stage === "done" && !transfer.reconcile && (
+          {state.stage === "done" && !transfer.reconcile && !transfer.publish && (
             <p className="mt-4 rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
               Transfer complete — the content is in {destination.label} and all
               temporary resources were cleaned up.
@@ -984,6 +1241,121 @@ function ExecuteSavedTransfer({
               </p>
             )}
             {reconRows.length > 0 && <ApplyRowsTable rows={reconRows} />}
+          </CardContent>
+        </Card>
+      )}
+
+      {transfer.publish && publishPhase !== "idle" && (
+        <Card style="outline" padding="md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Icon path={mdiPublish} size={0.8} />
+              Publish — {destination.label}
+            </CardTitle>
+            <CardDescription>
+              {
+                PUBLISH_TARGETS.find(
+                  (t) => t.value === transfer.publish?.target,
+                )?.label
+              }
+              {" · "}
+              {
+                PUBLISH_MODES.find((m) => m.value === transfer.publish?.mode)
+                  ?.label
+              }
+              {" · related items excluded"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {publishPhase === "skipped" && (
+              <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-sm text-[#953d00]">
+                Publishing was skipped because the reconciliation step did not
+                complete cleanly — publish manually once it is fixed.
+              </p>
+            )}
+            {publishPhase === "running" && (
+              <div className="flex items-center gap-2 text-sm text-text-subtle">
+                <Icon path={mdiLoading} className="animate-spin" />
+                Publishing to Experience Edge…
+              </div>
+            )}
+            {publishNote && (
+              <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-xs text-[#953d00]">
+                {publishNote}
+              </p>
+            )}
+            {publishRows.length > 0 && (
+              <ul className="flex flex-col gap-1 text-xs">
+                {publishRows.map((row) => (
+                  <li
+                    key={row.path}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    <span
+                      className="max-w-80 truncate font-mono text-text-subtle"
+                      title={row.path}
+                    >
+                      {row.path}
+                    </span>
+                    {row.operationId ? (
+                      <StateBadge state="Queued" />
+                    ) : (
+                      <>
+                        <StateBadge state="Failed" />
+                        {row.error && (
+                          <span className="text-danger-fg">{row.error}</span>
+                        )}
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {publishJobs.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-text-subtle">
+                  Publishing jobs on {destination.label}
+                </span>
+                <ul className="flex flex-col gap-1 text-xs">
+                  {publishJobs.map((job) => (
+                    <li
+                      key={job.handle}
+                      className="flex flex-wrap items-center gap-2"
+                    >
+                      <span
+                        className="max-w-80 truncate font-mono text-text-subtle"
+                        title={job.name}
+                      >
+                        {job.name}
+                      </span>
+                      <StateBadge state={job.jobState ?? "Unknown"} />
+                      {job.processed !== null && (
+                        <span className="text-text-subtle">
+                          {job.processed} item(s)
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {publishPhase === "failed" && (
+              <div className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
+                <p className="font-semibold">Publishing failed</p>
+                <p className="mt-1">{publishError}</p>
+                <p className="mt-1">
+                  The transfer itself completed — you can publish the
+                  destination manually.
+                </p>
+              </div>
+            )}
+            {publishPhase === "done" && (
+              <p className="rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
+                {publishJobs.length > 0
+                  ? `Publishing finished — ${publishJobs.filter((j) => j.jobState !== "Failed").length}/${publishJobs.length} job(s) completed on ${destination.label}.`
+                  : `The publish was queued on ${destination.label}.`}
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

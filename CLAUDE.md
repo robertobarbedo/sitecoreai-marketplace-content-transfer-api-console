@@ -107,6 +107,22 @@ attempt runtime testing.** Verification is limited to:
   displayed as **Quick Transfer**, the "Item transfers" tab as **Transfer
   Details History** and the history tab as **Transfer Timeline** (values
   `transfer`/`item-transfers`/`history` unchanged).
+- Saved transfers can also **publish at the end** (`SavedTransfer.publish`,
+  optional — absent on older entries): after the transfer (and a clean
+  reconcile, when both are set; a failed/partially-failed reconcile SKIPS the
+  publish) the destination is published via `publishItem` authoring GraphQL
+  (`src/utils/publish.ts`, adapted from the publishing-center sibling) — over
+  the Marketplace SDK against the destination's resolved tenant (same
+  `matchEnvironmentToConnection` mapping as reconcile), NOT the stored REST
+  connections. Invariants: `publishSubItems: true`, `publishRelatedItems:
+  false`, `targetDatabases: "experienceedge"`; target `EntireTree` publishes
+  the hardcoded `/sitecore` root, `TransferredPaths` fires one publish per
+  deduped DataTree path; mode `SMART` = Smart, `FULL` = Republish (UI label).
+  Languages come from the destination's `languages` query, falling back to
+  `en` with a visible warning. Progress is observed by diffing
+  `jobs(input:{jobName:"Publish*"})` against a pre-publish baseline of job
+  handles (best-effort: unobservable jobs resolve as "queued", never as
+  failed).
 - The **Reconciliation** tab is a read-only integration with the sibling
   `sitecoreai-marketplace-content-reconciliation` app: on open it checks every
   environment (Marketplace SDK authoring GraphQL, not the stored connections)

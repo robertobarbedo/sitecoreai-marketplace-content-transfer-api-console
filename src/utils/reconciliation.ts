@@ -245,6 +245,31 @@ export function environmentLabel(env: {
   return env.tenantDisplayName || env.tenantName;
 }
 
+/**
+ * Maps a stored host+credentials connection to the matching SitecoreAI
+ * environment (needed by the post-transfer reconcile and publish steps, which
+ * run over the Marketplace SDK's authoring GraphQL, not the stored
+ * credentials): XM Cloud hosts embed the tenantName; fall back to a label
+ * match.
+ */
+export function matchEnvironmentToConnection(
+  envs: ReconciliationEnvironment[],
+  connection: { host: string; label: string },
+): ReconciliationEnvironment | null {
+  const host = connection.host.toLowerCase();
+  return (
+    envs.find(
+      (e) => e.tenantName && host.includes(e.tenantName.toLowerCase()),
+    ) ??
+    envs.find(
+      (e) =>
+        environmentLabel(e).toLowerCase() ===
+        connection.label.trim().toLowerCase(),
+    ) ??
+    null
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Marker detection
 // ---------------------------------------------------------------------------

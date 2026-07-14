@@ -36,6 +36,24 @@ export interface EnvironmentConnection {
 // Saved transfers (stored in the content tree next to the settings)
 // ---------------------------------------------------------------------------
 
+/** What a post-transfer publish covers. */
+export type PublishTarget = "EntireTree" | "TransferredPaths";
+
+/** publishItemMode value of the authoring GraphQL publishItem mutation. */
+export type PublishMode = "SMART" | "FULL";
+
+/**
+ * Post-transfer publish settings. The publish always runs on the destination
+ * environment, always includes subitems, never includes related items, and
+ * always targets the "experienceedge" database.
+ */
+export interface SavedTransferPublish {
+  /** EntireTree publishes /sitecore; TransferredPaths one publish per path. */
+  target: PublishTarget;
+  /** SMART = smart publish, FULL = republish. */
+  mode: PublishMode;
+}
+
 /**
  * A reusable transfer definition: source/destination connection, the data
  * trees to move, and optionally a reconciliation run at the end. Persisted as
@@ -58,6 +76,12 @@ export interface SavedTransfer {
    * destination connection at execution time).
    */
   reconcile: boolean;
+  /**
+   * Publish the destination environment after the transfer (and the
+   * reconciliation, when enabled) finish. Absent on entries saved before the
+   * option existed — treated as "no publish".
+   */
+  publish?: SavedTransferPublish;
   updatedAt: string;
 }
 
