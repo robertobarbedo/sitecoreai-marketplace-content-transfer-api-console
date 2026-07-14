@@ -28,8 +28,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { EnvBadge, StateBadge } from "@/components/badges";
-import { ConfirmDestructiveDialog } from "@/components/confirm-destructive-dialog";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
 import {
   SCOPES,
@@ -93,7 +100,7 @@ export function AutoMigrationTab({
     "OverrideExistingItem",
   );
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [confirmOverrideOpen, setConfirmOverrideOpen] = useState(false);
+  const [confirmStartOpen, setConfirmStartOpen] = useState(false);
 
   // Surface terminal transitions once (toast on success, onError on failure —
   // which also reopens the connections modal for credential problems).
@@ -128,13 +135,9 @@ export function AutoMigrationTab({
     });
   };
 
-  const handleStart = () => {
-    if (mergeStrategy === "OverrideExistingTree") {
-      setConfirmOverrideOpen(true);
-      return;
-    }
-    beginMigration();
-  };
+  const handleStart = () => setConfirmStartOpen(true);
+
+  const overrideTree = mergeStrategy === "OverrideExistingTree";
 
   return (
     <div className="flex flex-col gap-4">
@@ -226,37 +229,6 @@ export function AutoMigrationTab({
             </p>
           )}
 
-          {/* Transfer direction, using the source/destination color code */}
-          <div className="flex flex-wrap items-center justify-center gap-3 py-1">
-            <div className="flex min-w-28 flex-col items-center rounded-lg border border-[#003767]/15 bg-[#c6f1ff] px-4 py-1.5">
-              <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-[#003767]/70">
-                Source
-              </span>
-              <span
-                className="max-w-44 truncate text-xs font-bold text-[#003767]"
-                title={source.host}
-              >
-                {source.label}
-              </span>
-            </div>
-            <Icon
-              path={mdiArrowRightBold}
-              size={0.9}
-              className="shrink-0 text-text-subtle"
-            />
-            <div className="flex min-w-28 flex-col items-center rounded-lg border border-success/20 bg-success-bg px-4 py-1.5">
-              <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-success-fg/70">
-                Destination
-              </span>
-              <span
-                className="max-w-44 truncate text-xs font-bold text-success-fg"
-                title={destination.host}
-              >
-                {destination.label}
-              </span>
-            </div>
-          </div>
-
           <div className="flex flex-col items-center gap-2">
             {running ? (
               <Button variant="outline" colorScheme="danger" onClick={cancel}>
@@ -331,20 +303,75 @@ export function AutoMigrationTab({
         onSelect={setItemPath}
       />
 
-      <ConfirmDestructiveDialog
-        open={confirmOverrideOpen}
-        onOpenChange={setConfirmOverrideOpen}
-        title="Override the existing tree?"
-        description={
-          <>
-            The transfer will replace the whole tree matching{" "}
-            <span className="font-mono text-xs">{itemPath.trim()}</span> in{" "}
-            {destination.label}, then run to completion automatically.
-          </>
-        }
-        confirmLabel="Start transferring"
-        onConfirm={async () => beginMigration()}
-      />
+      <Dialog open={confirmStartOpen} onOpenChange={setConfirmStartOpen}>
+        <DialogContent className={overrideTree ? "border-danger" : undefined}>
+          <DialogHeader>
+            <DialogTitle className={overrideTree ? "text-danger-fg" : undefined}>
+              Start this transfer?
+            </DialogTitle>
+            <DialogDescription>
+              <span className="font-mono text-xs">{itemPath.trim()}</span> (
+              {SCOPES.find((s) => s.value === scope)?.label.toLowerCase()}) will
+              be transferred:
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Transfer direction, using the source/destination color code */}
+          <div className="flex flex-wrap items-center justify-center gap-3 py-1">
+            <div className="flex min-w-28 flex-col items-center rounded-lg border border-[#003767]/15 bg-[#c6f1ff] px-4 py-1.5">
+              <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-[#003767]/70">
+                Source
+              </span>
+              <span
+                className="max-w-44 truncate text-xs font-bold text-[#003767]"
+                title={source.host}
+              >
+                {source.label}
+              </span>
+            </div>
+            <Icon
+              path={mdiArrowRightBold}
+              size={0.9}
+              className="shrink-0 text-text-subtle"
+            />
+            <div className="flex min-w-28 flex-col items-center rounded-lg border border-success/20 bg-success-bg px-4 py-1.5">
+              <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-success-fg/70">
+                Destination
+              </span>
+              <span
+                className="max-w-44 truncate text-xs font-bold text-success-fg"
+                title={destination.host}
+              >
+                {destination.label}
+              </span>
+            </div>
+          </div>
+
+          {overrideTree && (
+            <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
+              &quot;Override existing tree&quot; replaces the whole tree
+              matching{" "}
+              <span className="font-mono text-xs">{itemPath.trim()}</span> in{" "}
+              {destination.label}.
+            </p>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmStartOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme={overrideTree ? "danger" : undefined}
+              onClick={() => {
+                setConfirmStartOpen(false);
+                beginMigration();
+              }}
+            >
+              Start transfer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
