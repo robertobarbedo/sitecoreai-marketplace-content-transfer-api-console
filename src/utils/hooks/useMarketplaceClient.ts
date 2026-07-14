@@ -50,6 +50,10 @@ async function getMarketplaceClient() {
   };
 
   client = await ClientSDK.init(config);
+  (window as unknown as { gtag?: (...args: unknown[]) => void }).gtag?.(
+    "event",
+    "marketplace_client_ready"
+  );
   return client;
 }
 

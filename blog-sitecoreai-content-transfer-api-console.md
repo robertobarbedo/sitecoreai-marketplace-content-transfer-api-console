@@ -15,7 +15,7 @@ and let the console drive the APIs for you.
 
 ## One Console, Two Modes
 
-### Content Transfer
+### Quick Transfer
 
 The default tab covers the everyday case. It asks for three things:
 
@@ -31,7 +31,7 @@ files are generated and consumed into the target database, and the temporary
 resources are cleaned up at the end. A live checklist shows each stage as it
 runs, and you can cancel at any point.
 
-<!-- Screenshot: Content Transfer tab — progress checklist mid-run -->
+<!-- Screenshot: Quick Transfer tab — progress checklist mid-run -->
 
 💡 If a run fails midway, the transfer ID is kept in your recent transfers so
 you can pick it up in the Advanced tab — nothing is lost.
@@ -56,16 +56,61 @@ with these APIs directly.
 
 <!-- Screenshot: Advanced tab — chunk sets table with copy progress -->
 
+## Saved Transfers
+
+Most transfers aren't one-offs — you push the same content trees from the
+same source to the same destination, release after release. The **Saved
+Transfers** tab turns that routine into a stored definition: a name, a
+source/destination pair, and any number of data trees, each with its own
+scope and merge strategy.
+
+Definitions are stored in the Sitecore content tree next to the environment
+connections, so the whole team shares the same list. When it's time to
+deploy, one click runs the saved transfer through the same automatic
+pipeline as Quick Transfer — full progress checklist included.
+
+Each saved transfer can also opt in to **Reconcile at the end**: once the
+content lands on the destination, the console applies that environment's
+desired values on top (more on that below). Transfer and fix-up in a single
+run.
+
+<!-- Screenshot: Saved Transfers tab — list of definitions with Run buttons -->
+
+## Reconciliation
+
+Transferring content between environments has a classic side effect: items
+that are *supposed* to differ per environment — API keys, hostnames,
+feature toggles — get overwritten with the source's values. The
+**Reconciliation** tab closes that gap.
+
+It integrates with the **Content Reconciliation** Marketplace app
+<!-- TODO: link to the Content Reconciliation blog post -->, where you
+define the desired per-environment values. The console reads those
+definitions and renders a preview: every item and field that deviates from
+what that environment should contain, side by side with the value it will
+get. Apply the plan and the destination is patched back to its intended
+state.
+
+Defining and maintaining the desired values happens in the Content
+Reconciliation app itself — I'll cover that in an upcoming post
+<!-- TODO: replace with link to the reconciliation tool blog post -->. The
+console is the consumer: it checks each environment for the app's
+configuration, tells you if it isn't set up yet, and otherwise gives you
+preview-and-apply right where the transfers happen.
+
+<!-- Screenshot: Reconciliation tab — preview of planned changes -->
+
 ## Visibility Included
 
 Two more tabs cover the "what happened?" questions:
 
-- **Item transfers** lists every consumption on the destination, with item
-  counts, validation errors, and a drill-down to each transferred item
-- **History** shows the full state-transition timeline of every consumed
-  source, newest first
+- **Transfer Details History** lists every consumption on the destination,
+  with item counts, validation errors, and a drill-down to each transferred
+  item
+- **Transfer Timeline** shows the full state-transition timeline of every
+  consumed source, newest first
 
-<!-- Screenshot: History tab with an expanded timeline -->
+<!-- Screenshot: Transfer Timeline tab with an expanded timeline -->
 
 ## Under the Hood
 
@@ -90,9 +135,14 @@ A few design choices worth knowing:
 
 - The Content Transfer Console is a Marketplace app that wraps the SitecoreAI
   Content Transfer and Item Transfer APIs in one UI.
-- Use the **Content Transfer** tab for hands-off, one-path transfers with a
+- Use the **Quick Transfer** tab for hands-off, one-path transfers with a
   live progress checklist.
+- Use **Saved Transfers** to store recurring multi-tree transfers and run
+  them in one click — optionally reconciling the destination at the end.
+- The **Reconciliation** tab previews and re-applies each environment's
+  desired values after a transfer, powered by the Content Reconciliation app
+  <!-- TODO: link to the reconciliation tool blog post -->.
 - Use the **Advanced** tab for multiple paths, other databases, retries, and
   step-by-step control.
-- The **Item transfers** and **History** tabs answer "did it work?" down to
-  the individual item.
+- The **Transfer Details History** and **Transfer Timeline** tabs answer
+  "did it work?" down to the individual item.
