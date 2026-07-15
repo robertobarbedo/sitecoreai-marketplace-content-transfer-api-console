@@ -3,15 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   mdiCheckCircle,
-  mdiCircleOutline,
   mdiAlertCircle,
-  mdiLoading,
   mdiFileTree,
   mdiStop,
   mdiArrowRightBold,
 } from "@mdi/js";
 import { Icon } from "@/lib/icon";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,35 +33,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { EnvBadge, StateBadge } from "@/components/badges";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
+import {
+  TransferStageDetailsCard,
+  TransferStepper,
+} from "@/components/migration/transfer-progress";
 import {
   SCOPES,
   MERGE_STRATEGIES,
 } from "@/components/migration/create-transfer-card";
 import {
   useAutoMigration,
-  AUTO_MIGRATION_STAGES,
   type AutoMigrationStage,
 } from "@/src/utils/hooks/useAutoMigration";
-import { summarizeProgress } from "@/src/utils/hooks/useChunkCopy";
 import type {
   DataTreeScope,
   EnvironmentConnection,
   MergeStrategy,
 } from "@/src/types/transfer";
-
-const STAGE_LABELS: Record<
-  (typeof AUTO_MIGRATION_STAGES)[number],
-  { label: string; env: "source" | "destination" | "both" }
-> = {
-  create: { label: "Create the transfer operation", env: "source" },
-  snapshot: { label: "Snapshot content into chunk sets", env: "source" },
-  copy: { label: "Copy chunks to the destination", env: "both" },
-  complete: { label: "Generate .raif files", env: "destination" },
-  consume: { label: "Consume into the destination database", env: "destination" },
-  cleanup: { label: "Clean up transfer and blobs", env: "both" },
-};
 
 interface AutoMigrationTabProps {
   source: EnvironmentConnection;
@@ -260,16 +246,7 @@ export function AutoMigrationTab({
             )}
           </CardHeader>
           <CardContent>
-            <ol className="flex flex-col gap-3">
-              {AUTO_MIGRATION_STAGES.map((stage) => (
-                <StageRow
-                  key={stage}
-                  stage={stage}
-                  state={state}
-                  progressByChunkSet={progressByChunkSet}
-                />
-              ))}
-            </ol>
+            <TransferStepper state={state} />
 
             {state.stage === "done" && (
               <p className="mt-4 flex items-center gap-2 rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
@@ -293,6 +270,13 @@ export function AutoMigrationTab({
             )}
           </CardContent>
         </Card>
+      )}
+
+      {state.stage !== "idle" && (
+        <TransferStageDetailsCard
+          state={state}
+          progressByChunkSet={progressByChunkSet}
+        />
       )}
 
       <TreePickerDialog
@@ -376,124 +360,3 @@ export function AutoMigrationTab({
   );
 }
 
-/** One row of the pipeline checklist — also used by the Saved Transfers tab. */
-export function StageRow({
-  stage,
-  state,
-  progressByChunkSet,
-}: {
-  stage: (typeof AUTO_MIGRATION_STAGES)[number];
-  state: ReturnType<typeof useAutoMigration>["state"];
-  progressByChunkSet: ReturnType<typeof useAutoMigration>["progressByChunkSet"];
-}) {
-  const order = AUTO_MIGRATION_STAGES;
-  const currentIndex =
-    state.stage === "done"
-      ? order.length
-      : order.indexOf(
-          (state.stage === "failed" ? (state.failedAt ?? "create") : state.stage) as never,
-        );
-  const stageIndex = order.indexOf(stage);
-
-  const status: "pending" | "active" | "done" | "failed" =
-    stageIndex < currentIndex
-      ? "done"
-      : stageIndex > currentIndex
-        ? "pending"
-        : state.stage === "failed"
-          ? "failed"
-          : "active";
-
-  const { label, env } = STAGE_LABELS[stage];
-
-  return (
-    <li className="flex items-start gap-2">
-      <span
-        className={cn(
-          "mt-0.5 shrink-0",
-          status === "done" && "text-success",
-          status === "failed" && "text-danger",
-          status === "active" && "text-primary",
-          status === "pending" && "text-text-subtle",
-        )}
-      >
-        <Icon
-          path={
-            status === "done"
-              ? mdiCheckCircle
-              : status === "failed"
-                ? mdiAlertCircle
-                : status === "active"
-                  ? mdiLoading
-                  : mdiCircleOutline
-          }
-          size={0.8}
-          className={status === "active" ? "animate-spin" : ""}
-        />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "text-sm",
-              status === "pending" ? "text-text-subtle" : "text-on-surface",
-              status === "active" && "font-semibold",
-            )}
-          >
-            {label}
-          </span>
-          {env !== "both" ? (
-            <EnvBadge env={env} />
-          ) : (
-            <>
-              <EnvBadge env="source" />
-              <EnvBadge env="destination" />
-            </>
-          )}
-        </div>
-
-        {/* Live details for the data-heavy stages */}
-        {stage === "copy" && status !== "pending" && state.chunkSets.length > 0 && (
-          <ul className="mt-1 flex flex-col gap-0.5 text-xs text-text-subtle">
-            {state.chunkSets.map((chunkSet) => {
-              const { done, failed } = summarizeProgress(
-                progressByChunkSet[chunkSet.ChunkSetId],
-              );
-              return (
-                <li key={chunkSet.ChunkSetId} className="font-mono">
-                  {chunkSet.ChunkSetId.slice(0, 8)}… — {done}/{chunkSet.ChunkCount}{" "}
-                  chunks
-                  {failed > 0 && (
-                    <span className="text-danger-fg"> · {failed} failed</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {stage === "consume" &&
-          status !== "pending" &&
-          Object.keys(state.consumption).length > 0 && (
-            <ul className="mt-1 flex flex-col gap-1 text-xs">
-              {Object.entries(state.consumption).map(([name, progress]) => (
-                <li key={name} className="flex flex-wrap items-center gap-2">
-                  <span
-                    className="max-w-80 truncate font-mono text-text-subtle"
-                    title={name}
-                  >
-                    {name}
-                  </span>
-                  <StateBadge
-                    state={progress.state === "Waiting" ? "Queued" : progress.state}
-                  />
-                  {progress.detail && (
-                    <span className="text-text-subtle">{progress.detail}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-      </div>
-    </li>
-  );
-}

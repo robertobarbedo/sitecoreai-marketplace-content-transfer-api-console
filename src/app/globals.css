@@ -120,6 +120,19 @@
   --radius-xl: 0.75rem;
 
   --spacing-margin-page: 2rem;
+
+  /* Pulsing primary halo for the stepper's in-progress step. */
+  --animate-step-glow: step-glow 1.8s ease-in-out infinite;
+
+  @keyframes step-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(110, 63, 255, 0.45);
+    }
+    50% {
+      box-shadow: 0 0 0 7px rgba(110, 63, 255, 0.1);
+    }
+  }
 }
 
 @layer base {

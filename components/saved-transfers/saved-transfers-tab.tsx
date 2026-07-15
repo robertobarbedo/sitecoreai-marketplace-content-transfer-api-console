@@ -8,10 +8,10 @@ import {
   mdiDelete,
   mdiFileTree,
   mdiLoading,
+  mdiCloudUploadOutline,
   mdiPencil,
   mdiPlaylistPlus,
   mdiPlus,
-  mdiPublish,
   mdiRefresh,
   mdiSquareEditOutline,
   mdiStop,
@@ -34,18 +34,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StateBadge } from "@/components/badges";
+import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { ConfirmDestructiveDialog } from "@/components/confirm-destructive-dialog";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
 import {
   SCOPES,
   MERGE_STRATEGIES,
 } from "@/components/migration/create-transfer-card";
-import { StageRow } from "@/components/migration/auto-migration-tab";
-import { ApplyRowsTable } from "@/components/reconciliation/apply-rows-table";
 import {
-  useAutoMigration,
-  AUTO_MIGRATION_STAGES,
-} from "@/src/utils/hooks/useAutoMigration";
+  TransferStageDetailsCard,
+  TransferStepper,
+} from "@/components/migration/transfer-progress";
+import type { StepperStatus, StepperStep } from "@/components/ui/stepper";
+import { ApplyRowsTable } from "@/components/reconciliation/apply-rows-table";
+import { useAutoMigration } from "@/src/utils/hooks/useAutoMigration";
 import {
   loadSavedTransfers,
   saveSavedTransfers,
@@ -1124,6 +1126,38 @@ function ExecuteSavedTransfer({
   const reconUpdated = reconRows.filter((r) => r.status === "updated");
   const reconFailed = reconRows.filter((r) => r.status === "failed");
 
+  // Extra stepper steps for the chained phases ("skipped" renders pending).
+  const phaseStepStatus = (
+    phase: ReconcilePhase | PublishPhase,
+  ): StepperStatus =>
+    phase === "running"
+      ? "active"
+      : phase === "done"
+        ? "completed"
+        : phase === "failed"
+          ? "failed"
+          : "pending";
+  const extraSteps: StepperStep[] = [
+    ...(transfer.reconcile
+      ? [
+          {
+            label: "Reconcile",
+            description: "Destination",
+            status: phaseStepStatus(reconPhase),
+          },
+        ]
+      : []),
+    ...(transfer.publish
+      ? [
+          {
+            label: "Publish",
+            description: "Destination",
+            status: phaseStepStatus(publishPhase),
+          },
+        ]
+      : []),
+  ];
+
   // Lock the rest of the UI while the transfer (or the chained
   // reconciliation, which also writes content) is in flight.
   useEffect(() => {
@@ -1166,16 +1200,7 @@ function ExecuteSavedTransfer({
           )}
         </CardHeader>
         <CardContent>
-          <ol className="flex flex-col gap-3">
-            {AUTO_MIGRATION_STAGES.map((stage) => (
-              <StageRow
-                key={stage}
-                stage={stage}
-                state={state}
-                progressByChunkSet={progressByChunkSet}
-              />
-            ))}
-          </ol>
+          <TransferStepper state={state} extraSteps={extraSteps} />
 
           {state.stage === "failed" && (
             <div className="mt-4 rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
@@ -1198,15 +1223,19 @@ function ExecuteSavedTransfer({
         </CardContent>
       </Card>
 
+      <TransferStageDetailsCard
+        state={state}
+        progressByChunkSet={progressByChunkSet}
+        collapsible
+      />
+
       {transfer.reconcile && reconPhase !== "idle" && (
-        <Card style="outline" padding="md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Icon path={mdiSquareEditOutline} size={0.8} />
-              Reconciliation — {destination.label}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+        <CollapsibleCard
+          icon={mdiSquareEditOutline}
+          title={`Reconciliation — ${destination.label}`}
+          done={reconPhase === "done"}
+          contentClassName="flex flex-col gap-3"
+        >
             {reconPhase === "running" && (
               <div className="flex items-center gap-2 text-sm text-text-subtle">
                 <Icon path={mdiLoading} className="animate-spin" />
@@ -1241,18 +1270,15 @@ function ExecuteSavedTransfer({
               </p>
             )}
             {reconRows.length > 0 && <ApplyRowsTable rows={reconRows} />}
-          </CardContent>
-        </Card>
+        </CollapsibleCard>
       )}
 
       {transfer.publish && publishPhase !== "idle" && (
-        <Card style="outline" padding="md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Icon path={mdiPublish} size={0.8} />
-              Publish — {destination.label}
-            </CardTitle>
-            <CardDescription>
+        <CollapsibleCard
+          icon={mdiCloudUploadOutline}
+          title={`Publish — ${destination.label}`}
+          description={
+            <>
               {
                 PUBLISH_TARGETS.find(
                   (t) => t.value === transfer.publish?.target,
@@ -1264,9 +1290,11 @@ function ExecuteSavedTransfer({
                   ?.label
               }
               {" · related items excluded"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+            </>
+          }
+          done={publishPhase === "done"}
+          contentClassName="flex flex-col gap-3"
+        >
             {publishPhase === "skipped" && (
               <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-sm text-[#953d00]">
                 Publishing was skipped because the reconciliation step did not
@@ -1356,8 +1384,7 @@ function ExecuteSavedTransfer({
                   : `The publish was queued on ${destination.label}.`}
               </p>
             )}
-          </CardContent>
-        </Card>
+        </CollapsibleCard>
       )}
     </div>
   );
