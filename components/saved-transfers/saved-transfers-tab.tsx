@@ -719,7 +719,7 @@ function SavedTransferForm({
                 disabled={reconReady !== true}
                 onChange={(e) => setReconcile(e.target.checked)}
               />
-              Reconcile at the end
+              Reconcile after transfer
             </label>
             <span className="text-xs text-text-subtle">
               After a successful transfer, the desired values saved in the
@@ -1173,7 +1173,7 @@ function ExecuteSavedTransfer({
           <p className="text-sm text-text-subtle">
             {source.label} → {destination.label} · {transfer.dataTrees.length}{" "}
             path{transfer.dataTrees.length === 1 ? "" : "s"}
-            {transfer.reconcile && " · reconcile at the end"}
+            {transfer.reconcile && " · reconcile after transfer"}
             {transfer.publish && " · publish at the end"}
           </p>
         </div>
