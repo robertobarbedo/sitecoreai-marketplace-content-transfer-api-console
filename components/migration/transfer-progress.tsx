@@ -125,11 +125,14 @@ export function TransferStageDetailsCard({
   state,
   progressByChunkSet,
   collapsible = false,
+  defaultOpen = true,
 }: {
   state: PipelineState;
   progressByChunkSet: ReturnType<typeof useAutoMigration>["progressByChunkSet"];
   /** Collapsible header; auto-collapses when the pipeline completes. */
   collapsible?: boolean;
+  /** With `collapsible`, whether the card starts expanded. */
+  defaultOpen?: boolean;
 }) {
   const currentIndex = currentStageIndex(state);
   if (currentIndex < 0) return null;
@@ -249,6 +252,7 @@ export function TransferStageDetailsCard({
         icon={mdiOpenInNew}
         title="Transfer details"
         done={state.stage === "done"}
+        defaultOpen={defaultOpen}
       >
         {body}
       </CollapsibleCard>

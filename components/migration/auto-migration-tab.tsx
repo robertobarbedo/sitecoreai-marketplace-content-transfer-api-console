@@ -276,6 +276,8 @@ export function AutoMigrationTab({
         <TransferStageDetailsCard
           state={state}
           progressByChunkSet={progressByChunkSet}
+          collapsible
+          defaultOpen={false}
         />
       )}
 

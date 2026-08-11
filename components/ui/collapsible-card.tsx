@@ -22,6 +22,7 @@ export function CollapsibleCard({
   title,
   description,
   done = false,
+  defaultOpen = true,
   contentClassName,
   children,
 }: {
@@ -29,10 +30,12 @@ export function CollapsibleCard({
   title: React.ReactNode;
   description?: React.ReactNode;
   done?: boolean;
+  /** Initial expanded state (the user can toggle it afterwards). */
+  defaultOpen?: boolean;
   contentClassName?: string;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   const prevDone = useRef(done);
   useEffect(() => {
     if (done && !prevDone.current) setOpen(false);
