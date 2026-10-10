@@ -24,7 +24,10 @@ import { ItemTransfersTab } from "@/components/item-transfers/item-transfers-tab
 import { HistoryTab } from "@/components/history/history-tab";
 import { ReconciliationTab } from "@/components/reconciliation/reconciliation-tab";
 import { SavedTransfersTab } from "@/components/saved-transfers/saved-transfers-tab";
-import { BackupRestoreTab } from "@/components/backup-restore/backup-restore-tab";
+import {
+  BackupRestoreTab,
+  type BackupRestoreView,
+} from "@/components/backup-restore/backup-restore-tab";
 import { useMarketplaceClient } from "@/src/utils/hooks/useMarketplaceClient";
 import { getTenants } from "@/src/utils/sitecore-graphql";
 import {
@@ -86,6 +89,7 @@ export default function StandaloneExtension() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("transfer");
+  const [backupView, setBackupView] = useState<BackupRestoreView>("backup");
   const [sourceId, setSourceId] = useState("");
   const [destinationId, setDestinationId] = useState("");
   // While a transfer pipeline runs (Quick Transfer or an executing saved
@@ -422,6 +426,10 @@ export default function StandaloneExtension() {
                 }
                 disabled={transferRunning}
                 allowSame={activeTab === "backup"}
+                // Backup reads only the source, restore writes only the
+                // destination — grey out the side that isn't used.
+                disableSource={activeTab === "backup" && backupView === "restore"}
+                disableDestination={activeTab === "backup" && backupView === "backup"}
               />
               {organizationMode && tenants.length < 2 && (
                 <p className="-mt-2 text-sm text-text-subtle">
@@ -530,6 +538,8 @@ export default function StandaloneExtension() {
                       destination={destination}
                       showToast={showToast}
                       onRunningChange={setBackupRunning}
+                      view={backupView}
+                      onViewChange={setBackupView}
                     />
                   </TabsContent>
                 )}

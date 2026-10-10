@@ -2,6 +2,7 @@
 
 import { mdiArrowRightBold } from "@mdi/js";
 import { Icon } from "@/lib/icon";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -108,6 +109,9 @@ interface EnvironmentPickerProps {
    * (Backup & Restore: backup reads the source, restore the destination).
    */
   allowSame?: boolean;
+  /** Disables just one side (e.g. Backup uses only the source). */
+  disableSource?: boolean;
+  disableDestination?: boolean;
 }
 
 /**
@@ -124,13 +128,20 @@ export function EnvironmentPicker({
   onAction,
   disabled = false,
   allowSame = false,
+  disableSource = false,
+  disableDestination = false,
 }: EnvironmentPickerProps) {
   const same = !allowSame && sourceId !== "" && sourceId === destinationId;
 
   return (
     <div className="rounded-xl border border-border-muted bg-white p-4">
       <div className="flex flex-wrap items-end gap-4">
-        <div className="flex min-w-56 flex-1 flex-col gap-1.5">
+        <div
+          className={cn(
+            "flex min-w-56 flex-1 flex-col gap-1.5",
+            disableSource && "opacity-50",
+          )}
+        >
           <label className="text-xs font-bold uppercase tracking-wider text-[#003767]">
             Source environment
           </label>
@@ -142,7 +153,7 @@ export function EnvironmentPicker({
             role="source"
             onAction={onAction}
             placeholder="Select the environment to transfer from"
-            disabled={disabled}
+            disabled={disabled || disableSource}
           />
         </div>
 
@@ -150,7 +161,12 @@ export function EnvironmentPicker({
           <Icon path={mdiArrowRightBold} size={1} />
         </div>
 
-        <div className="flex min-w-56 flex-1 flex-col gap-1.5">
+        <div
+          className={cn(
+            "flex min-w-56 flex-1 flex-col gap-1.5",
+            disableDestination && "opacity-50",
+          )}
+        >
           <label className="text-xs font-bold uppercase tracking-wider text-success-fg">
             Destination environment
           </label>
@@ -162,7 +178,7 @@ export function EnvironmentPicker({
             role="destination"
             onAction={onAction}
             placeholder="Select the environment to transfer to"
-            disabled={disabled}
+            disabled={disabled || disableDestination}
           />
         </div>
       </div>

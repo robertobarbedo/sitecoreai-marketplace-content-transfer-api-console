@@ -104,7 +104,10 @@ attempt runtime testing.** Verification is limited to:
   click handler (user gesture) — save dialog → OPFS staging → in-memory
   download fallback. The merge strategy is chosen at backup time (baked into
   the package). Recent backups are a localStorage convenience
-  (`recent-backups.ts`).
+  (`recent-backups.ts`). Backup / Restore are switched by an in-tab sidebar
+  (`components/ui/sidebar.tsx` — only the MENU primitives of the Blok
+  Sidebar, no app-shell provider/fixed container; stacks above the content
+  below `md`).
 - All sibling folders under `C:\Marketplace` are reference material only —
   never modify them. This app mirrors the architecture of
   `sitecoreai-marketplace-experience-edge-admin-console`.

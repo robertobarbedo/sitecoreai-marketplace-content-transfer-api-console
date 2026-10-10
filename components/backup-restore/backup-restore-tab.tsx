@@ -33,6 +33,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Stepper, type StepperStep } from "@/components/ui/stepper";
+import {
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarNav,
+} from "@/components/ui/sidebar";
 import { EnvBadge, StateBadge } from "@/components/badges";
 import { ConfirmDestructiveDialog } from "@/components/confirm-destructive-dialog";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
@@ -81,7 +89,13 @@ interface BackupRestoreTabProps {
   showToast: ShowToast;
   /** Reports a running backup/restore so the page can lock the rest. */
   onRunningChange?: (running: boolean) => void;
+  /** Selected sidebar view — owned by the page, which disables the unused
+   *  side of the environment picker. */
+  view: BackupRestoreView;
+  onViewChange: (view: BackupRestoreView) => void;
 }
+
+export type BackupRestoreView = "backup" | "restore";
 
 /**
  * Backup & Restore (Organization mode only). Backup snapshots content of the
@@ -93,8 +107,9 @@ export function BackupRestoreTab({
   destination,
   showToast,
   onRunningChange,
+  view,
+  onViewChange: setView,
 }: BackupRestoreTabProps) {
-  const [view, setView] = useState<"backup" | "restore">("backup");
   const [backupRunning, setBackupRunning] = useState(false);
   const [restoreRunning, setRestoreRunning] = useState(false);
   const running = backupRunning || restoreRunning;
@@ -104,69 +119,53 @@ export function BackupRestoreTab({
   }, [running, onRunningChange]);
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border-muted bg-white p-2">
-        <ViewButton
-          active={view === "backup"}
-          disabled={running}
-          icon={mdiArchiveArrowDownOutline}
-          onClick={() => setView("backup")}
-        >
-          Backup
-        </ViewButton>
-        <ViewButton
-          active={view === "restore"}
-          disabled={running}
-          icon={mdiArchiveArrowUpOutline}
-          onClick={() => setView("restore")}
-        >
-          Restore
-        </ViewButton>
-      </div>
+    <div className="flex flex-col gap-4 md:flex-row md:items-start">
+      <SidebarNav className="md:w-56 md:shrink-0" aria-label="Backup and restore">
+        <SidebarGroup>
+          <SidebarGroupLabel>Backup &amp; Restore</SidebarGroupLabel>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={view === "backup"}
+                disabled={running && view !== "backup"}
+                onClick={() => setView("backup")}
+              >
+                <Icon path={mdiArchiveArrowDownOutline} size={0.75} />
+                <span>Backup</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={view === "restore"}
+                disabled={running && view !== "restore"}
+                onClick={() => setView("restore")}
+              >
+                <Icon path={mdiArchiveArrowUpOutline} size={0.75} />
+                <span>Restore</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarNav>
 
       {/* Both stay mounted so a running job survives the view switch. */}
-      <div hidden={view !== "backup"}>
-        <BackupPanel
-          source={source}
-          showToast={showToast}
-          onRunningChange={setBackupRunning}
-        />
-      </div>
-      <div hidden={view !== "restore"}>
-        <RestorePanel
-          destination={destination}
-          showToast={showToast}
-          onRunningChange={setRestoreRunning}
-        />
+      <div className="min-w-0 flex-1">
+        <div hidden={view !== "backup"}>
+          <BackupPanel
+            source={source}
+            showToast={showToast}
+            onRunningChange={setBackupRunning}
+          />
+        </div>
+        <div hidden={view !== "restore"}>
+          <RestorePanel
+            destination={destination}
+            showToast={showToast}
+            onRunningChange={setRestoreRunning}
+          />
+        </div>
       </div>
     </div>
-  );
-}
-
-function ViewButton({
-  active,
-  disabled,
-  icon,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  disabled: boolean;
-  icon: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button
-      size="sm"
-      variant={active ? "default" : "ghost"}
-      onClick={onClick}
-      disabled={disabled && !active}
-      aria-pressed={active}
-    >
-      <Icon path={icon} />
-      {children}
-    </Button>
   );
 }
 
