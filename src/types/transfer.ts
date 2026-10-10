@@ -17,6 +17,19 @@ export interface TenantInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Transfer modes
+// ---------------------------------------------------------------------------
+
+/**
+ * organization = transfer between the environments this app is installed on
+ * (Marketplace SDK, no credentials). cross-org = transfer between any
+ * environments, including other organizations, through the app's own API
+ * routes with stored automation client credentials. A transfer never mixes
+ * the two transports.
+ */
+export type TransferMode = "organization" | "cross-org";
+
+// ---------------------------------------------------------------------------
 // Environment connections (stored in the content tree, selected in the UI)
 // ---------------------------------------------------------------------------
 
@@ -30,6 +43,14 @@ export interface EnvironmentConnection {
   /** Automation client credentials created in SitecoreAI Deploy. */
   clientId: string;
   clientSecret: string;
+  /**
+   * Set only on the environments synthesized from the app's installation
+   * (Organization mode — never stored): every call goes through the
+   * Marketplace SDK with this sitecoreContextId; host and credentials are
+   * empty.
+   */
+  kind?: "organization";
+  contextId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +84,15 @@ export interface SavedTransfer {
   /** Stable identifier generated when the saved transfer is created. */
   id: string;
   name: string;
-  /** References into the stored connections list (EnvironmentConnection.id). */
+  /**
+   * Mode the transfer was saved in. Absent on entries saved before modes
+   * existed — those are "cross-org" (stored connections).
+   */
+  mode?: TransferMode;
+  /**
+   * References into the environment list of the transfer's mode: stored
+   * connection ids (cross-org) or tenant ids (organization).
+   */
   sourceConnectionId: string;
   destinationConnectionId: string;
   /** Labels at save time — shown when the referenced connection is gone. */
@@ -240,6 +269,8 @@ export interface BlobSourceState {
   BlobState: BlobState;
   Error?: string | null;
   SourceName: string;
+  /** "consumed.*" name once the import worker picked the source up. */
+  ConsumedName?: string | null;
 }
 
 export interface FileSourcesPage {

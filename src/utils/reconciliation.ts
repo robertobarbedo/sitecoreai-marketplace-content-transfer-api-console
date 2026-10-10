@@ -245,27 +245,94 @@ export function environmentLabel(env: {
   return env.tenantDisplayName || env.tenantName;
 }
 
+/** Lowercased alphanumeric form, so "CLHIA / qa" and "clhia-qa" compare. */
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 /**
- * Maps a stored host+credentials connection to the matching SitecoreAI
+ * The parts of a display name: "CLHIA / qa" → ["clhia", "qa"]. Sitecore
+ * composes tenant display names as "<project> / <environment>".
+ */
+function displayNameParts(env: ReconciliationEnvironment): string[] {
+  return environmentLabel(env)
+    .split("/")
+    .map((part) => normalize(part))
+    .filter(Boolean);
+}
+
+/**
+ * The identifying segments of an XM Cloud host:
+ * "xmc-canadianlif9e60-clhiae434-qae947.sitecorecloud.io"
+ * → ["canadianlif9e60", "clhiae434", "qae947"]. Each segment is the
+ * corresponding tenant part with a short generated suffix appended, so
+ * comparison is by prefix, never by equality.
+ */
+function hostSegments(host: string): string[] {
+  return host
+    .toLowerCase()
+    .split(".")[0]
+    .replace(/^xmc-/, "")
+    .split("-")
+    .map((segment) => normalize(segment))
+    .filter(Boolean);
+}
+
+/** Exactly one match counts — an ambiguous guess is worse than none. */
+function onlyMatch(
+  envs: ReconciliationEnvironment[],
+  predicate: (env: ReconciliationEnvironment) => boolean,
+): ReconciliationEnvironment | null {
+  const matches = envs.filter(predicate);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/**
+ * Maps a transfer destination to the matching SitecoreAI
  * environment (needed by the post-transfer reconcile and publish steps, which
  * run over the Marketplace SDK's authoring GraphQL, not the stored
- * credentials): XM Cloud hosts embed the tenantName; fall back to a label
- * match.
+ * credentials).
+ *
+ * `tenantName` is null in many organizations — there, the only identifying
+ * data is the "<project> / <environment>" display name, so match that against
+ * the connection label and against the host segments (which carry the same
+ * parts, each with a generated suffix). Every tier requires a UNIQUE match:
+ * reconcile and publish write to the environment this returns, so guessing
+ * between two candidates could write to the wrong one.
  */
 export function matchEnvironmentToConnection(
   envs: ReconciliationEnvironment[],
-  connection: { host: string; label: string },
+  connection: { host: string; label: string; contextId?: string },
 ): ReconciliationEnvironment | null {
+  // Organization-mode environments ARE installed tenants — exact match.
+  if (connection.contextId) {
+    return envs.find((e) => e.contextId === connection.contextId) ?? null;
+  }
   const host = connection.host.toLowerCase();
+  const label = normalize(connection.label);
+  const segments = hostSegments(connection.host);
+
   return (
-    envs.find(
-      (e) => e.tenantName && host.includes(e.tenantName.toLowerCase()),
+    // 1. tenantName, when the org exposes it, is embedded in the host.
+    onlyMatch(
+      envs,
+      (e) => Boolean(e.tenantName) && host.includes(e.tenantName.toLowerCase()),
     ) ??
-    envs.find(
-      (e) =>
-        environmentLabel(e).toLowerCase() ===
-        connection.label.trim().toLowerCase(),
-    ) ??
+    // 2. The connection label is the whole display name ("CLHIA / qa").
+    onlyMatch(envs, (e) => normalize(environmentLabel(e)) === label) ??
+    // 3. The connection label is just the environment part ("qa").
+    onlyMatch(envs, (e) => displayNameParts(e).includes(label)) ??
+    // 4. No usable label: every display-name part prefixes a host segment
+    //    ("clhia" → "clhiae434", "qa" → "qae947").
+    onlyMatch(envs, (e) => {
+      const parts = displayNameParts(e);
+      return (
+        parts.length > 0 &&
+        parts.every((part) =>
+          segments.some((segment) => segment.startsWith(part)),
+        )
+      );
+    }) ??
     null
   );
 }

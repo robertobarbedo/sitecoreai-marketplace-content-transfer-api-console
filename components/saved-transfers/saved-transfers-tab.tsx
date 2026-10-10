@@ -37,6 +37,8 @@ import { StateBadge } from "@/components/badges";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { ConfirmDestructiveDialog } from "@/components/confirm-destructive-dialog";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
+import { EnvironmentSelect } from "@/components/migration/environment-picker";
+import { MODE_LABELS } from "@/components/settings/settings-dialog";
 import {
   SCOPES,
   MERGE_STRATEGIES,
@@ -54,6 +56,7 @@ import {
 } from "@/src/utils/saved-transfers-store";
 import {
   detectReconciliationMarkers,
+  environmentLabel,
   getReconciliationEnvironments,
   isReconciliationReady,
   loadReconciliationData,
@@ -83,6 +86,7 @@ import type {
   PublishTarget,
   SavedTransfer,
   TenantInfo,
+  TransferMode,
 } from "@/src/types/transfer";
 
 const DEFAULT_TREE: DataTree = {
@@ -103,12 +107,44 @@ const PUBLISH_MODES: { value: PublishMode; label: string }[] = [
 
 type ToastVariant = "default" | "success" | "error" | "warning";
 
+/**
+ * Names what the app actually sees, so a failed destination match points at
+ * the cause (no environments granted / a different set than expected) instead
+ * of leaving the user to guess.
+ */
+function accessibleEnvironmentsHint(
+  envs: { tenantName: string; tenantDisplayName?: string }[],
+): string {
+  if (envs.length === 0) {
+    return "This app has access to no SitecoreAI environments at all — check the app's resource access in Developer Studio.";
+  }
+  return `Environments this app can access: ${envs
+    .map((e) => environmentLabel(e))
+    .join(", ")}.`;
+}
+
+/** Entries saved before modes existed used stored connections. */
+function savedTransferMode(transfer: SavedTransfer): TransferMode {
+  return transfer.mode ?? "cross-org";
+}
+
+function switchModeNotice(transfer: SavedTransfer): string {
+  return `"${transfer.name}" was saved in ${MODE_LABELS[savedTransferMode(transfer)]} mode. Switch to that mode to run or edit it.`;
+}
+
 interface SavedTransfersTabProps {
   client: ClientSDK;
   /** Tenants in resource-list order — saves go to the first one. */
   tenants: TenantInfo[];
-  /** All stored connections (merged across tenants). */
-  connections: EnvironmentConnection[];
+  /** Current transfer mode. */
+  mode: TransferMode;
+  /**
+   * Environments of the current mode: installed environments (Organization)
+   * or the stored connections merged across tenants (Cross-Organization).
+   */
+  environments: EnvironmentConnection[];
+  /** Opens the settings dialog, optionally with an explanatory notice. */
+  onOpenSettings: (notice?: string | null) => void;
   onError: (error: unknown, action: string) => void;
   showToast: (title: string, description?: string, variant?: ToastVariant) => void;
   /** Reports an executing transfer so the page can lock the rest of the UI. */
@@ -123,7 +159,9 @@ type View =
 export function SavedTransfersTab({
   client,
   tenants,
-  connections,
+  mode,
+  environments,
+  onOpenSettings,
   onError,
   showToast,
   onRunningChange,
@@ -133,6 +171,12 @@ export function SavedTransfersTab({
   const [view, setView] = useState<View>({ kind: "list" });
   const [confirmDelete, setConfirmDelete] = useState<SavedTransfer | null>(null);
   const [confirmExecute, setConfirmExecute] = useState<SavedTransfer | null>(null);
+
+  // Saved transfers reference ids of one mode's environment list — leave
+  // any open form/execution view when the mode changes.
+  useEffect(() => {
+    setView({ kind: "list" });
+  }, [mode]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -186,6 +230,10 @@ export function SavedTransfersTab({
   };
 
   const startExecute = (transfer: SavedTransfer) => {
+    if (savedTransferMode(transfer) !== mode) {
+      onOpenSettings(switchModeNotice(transfer));
+      return;
+    }
     if (transfer.dataTrees.some((t) => t.MergeStrategy === "OverrideExistingTree")) {
       setConfirmExecute(transfer);
       return;
@@ -193,14 +241,25 @@ export function SavedTransfersTab({
     setView({ kind: "execute", transfer });
   };
 
-  const connectionFor = (id: string) => connections.find((c) => c.id === id) ?? null;
+  const connectionFor = (id: string) =>
+    environments.find((c) => c.id === id) ?? null;
+
+  const startEdit = (transfer: SavedTransfer) => {
+    if (savedTransferMode(transfer) !== mode) {
+      onOpenSettings(switchModeNotice(transfer));
+      return;
+    }
+    setView({ kind: "form", editing: transfer });
+  };
 
   if (view.kind === "form") {
     return (
       <SavedTransferForm
         client={client}
         editing={view.editing}
-        connections={connections}
+        mode={mode}
+        environments={environments}
+        onOpenSettings={onOpenSettings}
         onCancel={() => setView({ kind: "list" })}
         onSave={handleSave}
       />
@@ -214,15 +273,21 @@ export function SavedTransfersTab({
       return (
         <div className="flex flex-col gap-4 rounded-xl border border-danger bg-danger-bg p-6 text-danger-fg">
           <div>
-            <h3 className="mb-1 font-bold">Connection missing</h3>
+            <h3 className="mb-1 font-bold">Environment missing</h3>
             <p className="text-sm">
               The {!source ? `source (${view.transfer.sourceLabel})` : ""}
               {!source && !destination ? " and " : ""}
               {!destination
                 ? `destination (${view.transfer.destinationLabel})`
                 : ""}{" "}
-              connection of this saved transfer no longer exists. Edit the
-              saved transfer or restore the connection in settings.
+              environment of this saved transfer is no longer available
+              {mode === "organization"
+                ? " (the app is no longer installed there)"
+                : ""}
+              . Edit the saved transfer
+              {mode === "organization"
+                ? "."
+                : " or restore the connection in settings."}
             </p>
           </div>
           <div>
@@ -306,23 +371,37 @@ export function SavedTransfersTab({
               </thead>
               <tbody>
                 {transfers.map((transfer) => {
-                  const source = connectionFor(transfer.sourceConnectionId);
-                  const destination = connectionFor(transfer.destinationConnectionId);
+                  // Entries of the other mode reference ids of a different
+                  // environment list — never resolve or flag them as missing.
+                  const inMode = savedTransferMode(transfer) === mode;
+                  const source = inMode
+                    ? connectionFor(transfer.sourceConnectionId)
+                    : null;
+                  const destination = inMode
+                    ? connectionFor(transfer.destinationConnectionId)
+                    : null;
                   return (
                     <tr
                       key={transfer.id}
-                      className="border-b border-border-muted last:border-b-0"
+                      className={`border-b border-border-muted last:border-b-0 ${inMode ? "" : "opacity-60"}`}
                     >
-                      <td className="px-4 py-3 font-semibold">{transfer.name}</td>
+                      <td className="px-4 py-3 font-semibold">
+                        {transfer.name}
+                        {savedTransferMode(transfer) === "cross-org" && (
+                          <span className="ml-2 whitespace-nowrap rounded-full bg-neutral-bg px-2 py-0.5 text-[10px] font-semibold text-neutral-fg">
+                            {MODE_LABELS["cross-org"]}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <ConnectionLabel
                           label={source?.label ?? transfer.sourceLabel}
-                          missing={!source}
+                          missing={inMode && !source}
                         />
                         <span className="mx-1 text-text-subtle">→</span>
                         <ConnectionLabel
                           label={destination?.label ?? transfer.destinationLabel}
-                          missing={!destination}
+                          missing={inMode && !destination}
                         />
                       </td>
                       <td className="px-4 py-3">
@@ -376,11 +455,13 @@ export function SavedTransfersTab({
                           <Button
                             size="sm"
                             onClick={() => startExecute(transfer)}
-                            disabled={!source || !destination}
+                            disabled={inMode && (!source || !destination)}
                             title={
-                              !source || !destination
-                                ? "A referenced connection no longer exists — edit the saved transfer first."
-                                : undefined
+                              !inMode
+                                ? `Saved in ${MODE_LABELS[savedTransferMode(transfer)]} mode — switch modes in settings to run it.`
+                                : !source || !destination
+                                  ? "A referenced environment no longer exists — edit the saved transfer first."
+                                  : undefined
                             }
                           >
                             Execute
@@ -388,7 +469,7 @@ export function SavedTransfersTab({
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setView({ kind: "form", editing: transfer })}
+                            onClick={() => startEdit(transfer)}
                           >
                             <Icon path={mdiPencil} />
                             Edit
@@ -457,13 +538,17 @@ function ConnectionLabel({ label, missing }: { label: string; missing: boolean }
 function SavedTransferForm({
   client,
   editing,
-  connections,
+  mode,
+  environments,
+  onOpenSettings,
   onCancel,
   onSave,
 }: {
   client: ClientSDK;
   editing: SavedTransfer | null;
-  connections: EnvironmentConnection[];
+  mode: TransferMode;
+  environments: EnvironmentConnection[];
+  onOpenSettings: (notice?: string | null) => void;
   onCancel: () => void;
   onSave: (saved: SavedTransfer) => Promise<void>;
 }) {
@@ -509,8 +594,14 @@ function SavedTransferForm({
     if (reconReady === false) setReconcile(false);
   }, [reconReady]);
 
-  const source = connections.find((c) => c.id === sourceId) ?? null;
-  const destination = connections.find((c) => c.id === destinationId) ?? null;
+  const source = environments.find((c) => c.id === sourceId) ?? null;
+  const destination = environments.find((c) => c.id === destinationId) ?? null;
+  const openModeSettings = () =>
+    onOpenSettings(
+      mode === "organization"
+        ? "Transferring between organizations requires Cross-Organization mode and automation client credentials for each environment."
+        : null,
+    );
 
   const updateTree = (index: number, patch: Partial<DataTree>) => {
     setTrees((prev) =>
@@ -533,6 +624,7 @@ function SavedTransferForm({
       await onSave({
         id: editing?.id ?? crypto.randomUUID(),
         name: name.trim(),
+        mode,
         sourceConnectionId: source.id,
         destinationConnectionId: destination.id,
         sourceLabel: source.label,
@@ -576,33 +668,31 @@ function SavedTransferForm({
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium">Source</label>
-            <Select value={sourceId} onValueChange={setSourceId}>
-              <SelectTrigger className="w-56" aria-label="Source environment">
-                <SelectValue placeholder="Select source" />
-              </SelectTrigger>
-              <SelectContent>
-                {connections.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EnvironmentSelect
+              environments={environments}
+              value={sourceId}
+              onChange={setSourceId}
+              mode={mode}
+              role="source"
+              onAction={openModeSettings}
+              placeholder="Select source"
+              className="w-56"
+              ariaLabel="Source environment"
+            />
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium">Destination</label>
-            <Select value={destinationId} onValueChange={setDestinationId}>
-              <SelectTrigger className="w-56" aria-label="Destination environment">
-                <SelectValue placeholder="Select destination" />
-              </SelectTrigger>
-              <SelectContent>
-                {connections.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EnvironmentSelect
+              environments={environments}
+              value={destinationId}
+              onChange={setDestinationId}
+              mode={mode}
+              role="destination"
+              onAction={openModeSettings}
+              placeholder="Select destination"
+              className="w-56"
+              ariaLabel="Destination environment"
+            />
           </div>
         </div>
         {source && destination && source.id === destination.id && (
@@ -915,7 +1005,7 @@ function ExecuteSavedTransfer({
       const target = matchEnvironmentToConnection(envs, destination);
       if (!target) {
         throw new Error(
-          `Could not match the destination environment (${destination.label}, ${destination.host}) to any SitecoreAI environment this app can access — publishing needs the matching environment's authoring GraphQL.`,
+          `Could not match the destination environment (${destination.label}, ${destination.host}) to any SitecoreAI environment this app can access — publishing needs the matching environment's authoring GraphQL. ${accessibleEnvironmentsHint(envs)}`,
         );
       }
 
@@ -1040,7 +1130,7 @@ function ExecuteSavedTransfer({
       const target = matchEnvironmentToConnection(envs, destination);
       if (!target) {
         throw new Error(
-          `Could not match the destination environment (${destination.label}, ${destination.host}) to any SitecoreAI environment this app can access — reconciliation needs the matching environment's authoring GraphQL.`,
+          `Could not match the destination environment (${destination.label}, ${destination.host}) to any SitecoreAI environment this app can access — reconciliation needs the matching environment's authoring GraphQL. ${accessibleEnvironmentsHint(envs)}`,
         );
       }
       const markers = await detectReconciliationMarkers(client, envs);
@@ -1193,9 +1283,9 @@ function ExecuteSavedTransfer({
       <Card style="outline" padding="md">
         <CardHeader>
           <CardTitle>Transfer progress</CardTitle>
-          {state.transferId && (
+          {state.transferIds.length > 0 && (
             <CardDescription className="font-mono text-xs">
-              Transfer {state.transferId}
+              Transfer {state.transferIds.join(" · ")}
             </CardDescription>
           )}
         </CardHeader>

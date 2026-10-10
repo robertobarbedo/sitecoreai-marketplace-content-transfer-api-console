@@ -2,7 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { EnvironmentConnection } from "@/src/types/transfer";
-import { copyChunk } from "@/src/utils/transfer-api";
+import {
+  copyChunkBetween,
+  isOrganizationEnvironment,
+} from "@/src/utils/environment-client";
 
 export type ChunkStatus = "pending" | "copying" | "done" | "failed";
 
@@ -17,8 +20,13 @@ export interface ChunkSetProgress {
   error?: string;
 }
 
-/** How many chunks are copied in parallel per chunk set. */
+/**
+ * How many chunks are copied in parallel per chunk set. Organization mode
+ * moves each chunk (often 90+ MB) through the browser and the SDK bridge, so
+ * it copies one at a time to bound memory.
+ */
 const CONCURRENCY = 3;
+const ORGANIZATION_CONCURRENCY = 1;
 
 export function summarizeProgress(progress: ChunkSetProgress | undefined) {
   const chunks = progress?.chunks ?? [];
@@ -29,7 +37,8 @@ export function summarizeProgress(progress: ChunkSetProgress | undefined) {
 
 /**
  * Client-side orchestration of the chunk copy phase: for a chunk set, walk
- * chunkIds 0 … ChunkCount − 1 and call the app's server-side copy route with
+ * chunkIds 0 … ChunkCount − 1 and copy each through the environment client
+ * (server-side copy route, or SDK get → save in Organization mode) with
  * bounded parallelism. Progress is tracked per chunk so a failed run can be
  * resumed without re-copying finished chunks.
  */
@@ -87,6 +96,8 @@ export function useChunkCopy(
       transferId: string,
       chunksetId: string,
       chunkCount: number,
+      /** Required in Organization mode (see copyChunkBetween). */
+      isMedia?: boolean,
     ): Promise<boolean> => {
       if (!source || !destination) return false;
 
@@ -117,12 +128,13 @@ export function useChunkCopy(
 
           setChunkStatus(chunksetId, chunkId, "copying");
           try {
-            const result = await copyChunk(
+            const result = await copyChunkBetween(
               source,
               destination,
               transferId,
               chunksetId,
               chunkId,
+              isMedia,
             );
             update(chunksetId, (prev) => {
               const chunks = [...prev.chunks];
@@ -145,7 +157,14 @@ export function useChunkCopy(
 
       await Promise.all(
         Array.from(
-          { length: Math.min(CONCURRENCY, Math.max(pendingChunkIds.length, 1)) },
+          {
+            length: Math.min(
+              isOrganizationEnvironment(source)
+                ? ORGANIZATION_CONCURRENCY
+                : CONCURRENCY,
+              Math.max(pendingChunkIds.length, 1),
+            ),
+          },
           worker,
         ),
       );
@@ -174,6 +193,7 @@ export function useChunkCopy(
       chunksetId: string,
       chunkId: number,
       chunkCount: number,
+      isMedia?: boolean,
     ): Promise<void> => {
       if (!source || !destination) return;
 
@@ -187,12 +207,13 @@ export function useChunkCopy(
       });
 
       try {
-        const result = await copyChunk(
+        const result = await copyChunkBetween(
           source,
           destination,
           transferId,
           chunksetId,
           chunkId,
+          isMedia,
         );
         update(chunksetId, (prev) => {
           const chunks = [...prev.chunks];

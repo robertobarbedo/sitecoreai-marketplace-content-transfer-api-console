@@ -1,6 +1,6 @@
 "use client";
 
-import type { DataTree } from "@/src/types/transfer";
+import type { DataTree, TransferMode } from "@/src/types/transfer";
 
 /**
  * A content transfer operation created (or attached) through this console.
@@ -18,6 +18,18 @@ export interface RecentTransfer {
   dataTrees: DataTree[];
   /** .raif file names returned by completed chunk sets, keyed by ChunkSetId. */
   raifFiles?: Record<string, string>;
+  /** Absent on entries recorded before modes existed — those are cross-org. */
+  mode?: TransferMode;
+  /**
+   * Organization mode only: whether the transfer's chunks are media (the SDK
+   * cannot read IsMedia from the chunk response). Absent = derive from the
+   * data trees, or ask.
+   */
+  isMedia?: boolean;
+}
+
+export function recentTransferMode(transfer: RecentTransfer): TransferMode {
+  return transfer.mode ?? "cross-org";
 }
 
 const STORAGE_KEY = "content-transfer-console.recent-transfers";

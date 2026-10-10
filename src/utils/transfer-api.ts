@@ -9,7 +9,7 @@ import type {
 /**
  * Error thrown by the client-side API wrapper. Carries the typed error code
  * returned by the app's own API routes so the UI can react (e.g. open the
- * connections modal on invalid_credentials).
+ * settings dialog on invalid_credentials).
  */
 export class TransferApiClientError extends Error {
   constructor(

@@ -13,9 +13,15 @@ import {
 
 interface ConnectionGateProps {
   onConfigure: () => void;
+  /** Leaves Cross-Organization mode (no connections needed there). */
+  onUseOrganization: () => void;
 }
 
-export function ConnectionGate({ onConfigure }: ConnectionGateProps) {
+/** Cross-Organization mode without any stored connection yet. */
+export function ConnectionGate({
+  onConfigure,
+  onUseOrganization,
+}: ConnectionGateProps) {
   return (
     <div className="w-full pt-16">
       <Card style="outline" padding="lg" className="w-full text-center">
@@ -24,19 +30,25 @@ export function ConnectionGate({ onConfigure }: ConnectionGateProps) {
             <Icon path={mdiSwapHorizontal} size={1} />
           </div>
           <CardTitle className="text-lg font-bold">
-            Connect your environments
+            Connect your environments for Cross-Organization transfers
           </CardTitle>
           <CardDescription className="text-text-subtle">
-            This console transfers content between two SitecoreAI environments
-            using the Content Transfer and Item Transfer APIs. Each environment
-            you want to use needs an <strong>automation client</strong> (Client
-            ID and Client Secret) created in SitecoreAI Deploy, plus its
-            environment host name. Add at least two connections — one source
-            and one destination — to start a transfer.
+            Cross-Organization mode transfers content between any two
+            SitecoreAI environments, including environments of other
+            organizations. Each environment you want to use needs an{" "}
+            <strong>automation client</strong> (Client ID and Client Secret)
+            created in SitecoreAI Deploy, plus its environment host name. Add
+            at least two connections — one source and one destination — to
+            start a transfer.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-3">
-          <Button onClick={onConfigure}>Manage connections</Button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button onClick={onConfigure}>Manage connections</Button>
+            <Button variant="outline" onClick={onUseOrganization}>
+              Use Organization mode instead
+            </Button>
+          </div>
           <p className="max-w-2xl text-sm text-text-subtle">
             <a
               href="https://deploy.sitecorecloud.io/credentials/environment"

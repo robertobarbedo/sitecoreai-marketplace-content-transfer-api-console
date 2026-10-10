@@ -5,6 +5,8 @@ import { CreateTransferCard } from "./create-transfer-card";
 import { ChunkSetsCard } from "./chunk-sets-card";
 import { ConsumeCard } from "./consume-card";
 import { CleanupCard } from "./cleanup-card";
+import { OrganizationConsumeCard } from "./organization-consume-card";
+import { isOrganizationEnvironment } from "@/src/utils/environment-client";
 import {
   loadRecentTransfers,
   upsertRecentTransfer,
@@ -98,12 +100,21 @@ export function MigrationTab({
         />
       )}
 
-      <ConsumeCard
-        destination={destination}
-        activeTransfer={activeTransfer}
-        onError={onError}
-        showToast={showToast}
-      />
+      {isOrganizationEnvironment(destination) ? (
+        <OrganizationConsumeCard
+          destination={destination}
+          activeTransfer={activeTransfer}
+          onError={onError}
+          showToast={showToast}
+        />
+      ) : (
+        <ConsumeCard
+          destination={destination}
+          activeTransfer={activeTransfer}
+          onError={onError}
+          showToast={showToast}
+        />
+      )}
 
       {activeTransfer && (
         <CleanupCard

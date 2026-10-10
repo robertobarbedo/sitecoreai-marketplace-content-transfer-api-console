@@ -29,19 +29,51 @@ Built on the [Sitecore Marketplace starter kit](https://github.com/Sitecore/mark
 Radix UI), following the same architecture as the sibling
 `sitecoreai-marketplace-experience-edge-admin-console`.
 
-Standalone apps are **global** (installed once per organization, not per
-tenant), so the settings dialog starts with a **Save in Environment:**
-selector — up to three tenant buttons (e.g. dev / QA / prod) choosing which
-tenant's content tree stores the connection list. Each tenant keeps its own
-connections; the last choice is remembered per browser.
+## Transfer modes
 
-## How authentication works
+The console has two modes. The switch lives in the settings dialog (gear
+icon); the last option of every source/destination dropdown —
+**"Transfer from/to another organization…"** — opens it too.
+
+| | **Organization** (default) | **Cross-Organization** |
+|---|---|---|
+| Environments | Every environment the app is installed on (`application.context.resourceAccess`), listed automatically | Connections you add: host + automation client ID/secret |
+| Credentials | None | Required for every environment |
+| Transport | Marketplace SDK (`xmc.contentTransfer.*`, `xmc.authoring.graphql`) | This app's own API routes (below) |
+| Chunk copy | In the browser: SDK `getChunk` → raw Blob → SDK `saveChunk` | Server-side copy route |
+| Transfer Details History / Transfer Timeline / blob list & discard | Not available (the SDK doesn't expose those Item Transfer endpoints) | Available |
+
+A transfer never mixes the two: both environments come from the same mode.
+Switching modes clears the source/destination selection, and the mode can't
+change while a transfer runs. Saved transfers remember their mode (entries
+saved before modes existed are Cross-Organization).
+
+Organization-mode notes:
+
+- The SDK's `getChunk` doesn't expose the `IsMedia` response header, so
+  media is derived from the paths: Quick Transfer and saved transfers run
+  Media Library paths and other content as **separate sub-transfers**; the
+  Advanced tab requires one kind per transfer.
+- Consumption is monitored with `getBlobState`, and cleanup deletes the
+  transfer operation only — consumed `.raif` blobs stay on the destination
+  (the SDK can't discard them).
+- Always the `master` database on the source side.
+
+## How authentication works (Cross-Organization mode)
 
 Marketplace apps have **no default access** to the Content/Item Transfer
-APIs. Users must supply, per environment, the **environment host name** and
-the **Client ID / Client Secret** of an *automation client* created in
-SitecoreAI Deploy (**Credentials → Environment → Create credentials →
-Automation** — requires Organization Admin or Owner).
+APIs outside the SDK. In Cross-Organization mode users supply, per
+environment, the **environment host name** and the **Client ID / Client
+Secret** of an *automation client* created in SitecoreAI Deploy
+(**Credentials → Environment → Create credentials → Automation** — requires
+Organization Admin or Owner).
+
+Standalone apps are **global** (installed once per organization, not per
+tenant), so the connections section of the settings dialog starts with a
+**Save in Environment:** selector — up to three tenant buttons (e.g. dev /
+QA / prod) choosing which tenant's content tree stores the connection list.
+Each tenant keeps its own connections; the last choice is remembered per
+browser.
 
 - Connections are entered in the app's settings dialog and persisted in the
   content tree of the **selected settings tenant** at
@@ -100,15 +132,18 @@ browser — the Marketplace SDK requires the app to run inside SitecoreAI.
    `https://<your-host>/`.
 3. Install the app for your organization and open it from the apps menu.
 
-### Create automation credentials
+### Create automation credentials (Cross-Organization mode only)
+
+Organization mode needs no credentials — install the app on each environment
+you want to transfer between and it appears in the dropdowns.
 
 1. In SitecoreAI **Deploy**, open **Credentials → Environment → Create
    credentials → Automation** for each environment you want to transfer
    between (you must be an Organization Admin or Owner).
 2. Find each environment's host name under **Projects → your project →
    Authoring environments → Details → Environment host name**.
-3. Open the console, click the settings gear, add a connection per
-   environment (label, host, Client ID, Client Secret), click **Test
+3. Open the console, click the settings gear, choose **Cross-Organization**,
+   add a connection per environment (label, host, Client ID, Client Secret), click **Test
    connection**, then **Save connection**.
 
 ## API routes

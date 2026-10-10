@@ -13,7 +13,10 @@ import {
 } from "@/components/ui/card";
 import { EnvBadge } from "@/components/badges";
 import { ConfirmDestructiveDialog } from "@/components/confirm-destructive-dialog";
-import { callTransferApi } from "@/src/utils/transfer-api";
+import {
+  deleteTransfer,
+  isOrganizationEnvironment,
+} from "@/src/utils/environment-client";
 import type { RecentTransfer } from "@/src/utils/recent-transfers";
 import type { EnvironmentConnection } from "@/src/types/transfer";
 
@@ -40,11 +43,7 @@ export function CleanupCard({
 
   const handleDelete = async () => {
     try {
-      await callTransferApi<void>(
-        source,
-        `/api/transfer/transfers/${encodeURIComponent(transfer.transferId)}`,
-        { method: "DELETE" },
-      );
+      await deleteTransfer(source, transfer.transferId);
       showToast(
         "Transfer deleted",
         `Operation ${transfer.transferId} and its resources were removed from ${source.label}.`,
@@ -67,8 +66,10 @@ export function CleanupCard({
         <CardDescription className="text-muted-foreground">
           Once every chunk set is completed (or if you abandon this migration),
           delete the transfer operation from {source.label} to free its
-          resources. Discarding consumed .raif blobs is available per blob in
-          step 3.
+          resources.{" "}
+          {isOrganizationEnvironment(source)
+            ? "Consumed .raif blobs stay on the destination — discarding them needs Cross-Organization mode."
+            : "Discarding consumed .raif blobs is available per blob in step 3."}
         </CardDescription>
       </CardHeader>
       <CardContent>

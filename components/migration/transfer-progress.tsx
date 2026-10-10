@@ -68,7 +68,7 @@ const STAGE_META: Record<
   cleanup: {
     title: "Clean up",
     hint: "Both",
-    detail: "Clean up transfer and blobs",
+    detail: "Clean up transfer resources",
     env: "both",
   },
 };

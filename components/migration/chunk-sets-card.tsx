@@ -20,12 +20,23 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { EnvBadge, StateBadge } from "@/components/badges";
-import { callTransferApi } from "@/src/utils/transfer-api";
+import {
+  completeChunkSet,
+  dataTreesMediaKind,
+  getTransferStatus,
+  isOrganizationEnvironment,
+} from "@/src/utils/environment-client";
 import { useChunkCopy, summarizeProgress } from "@/src/utils/hooks/useChunkCopy";
 import type { RecentTransfer } from "@/src/utils/recent-transfers";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type {
   ChunkSetMetadata,
-  CompleteChunkSetResult,
   ContentTransferStatus,
   EnvironmentConnection,
 } from "@/src/types/transfer";
@@ -62,6 +73,19 @@ export function ChunkSetsCard({
   const [advancedFor, setAdvancedFor] = useState<string | null>(null);
   const [singleChunkId, setSingleChunkId] = useState("0");
 
+  // Organization mode must tell saveChunk whether the chunks are media (the
+  // SDK hides the IsMedia response header). Known from the recorded entry or
+  // the data trees; an attached transfer without trees asks the user.
+  const organization = isOrganizationEnvironment(source);
+  const knownIsMedia =
+    transfer.isMedia ?? dataTreesMediaKind(transfer.dataTrees) ?? undefined;
+  const [chosenKind, setChosenKind] = useState<"" | "media" | "content">("");
+  const isMedia = !organization
+    ? undefined
+    : knownIsMedia ??
+      (chosenKind === "" ? undefined : chosenKind === "media");
+  const needsKind = organization && isMedia === undefined;
+
   const {
     progressByChunkSet,
     copyChunkSet,
@@ -73,10 +97,7 @@ export function ChunkSetsCard({
     async (silent = false) => {
       if (!silent) setLoading(true);
       try {
-        const result = await callTransferApi<ContentTransferStatus>(
-          source,
-          `/api/transfer/transfers/${encodeURIComponent(transfer.transferId)}/status`,
-        );
+        const result = await getTransferStatus(source, transfer.transferId);
         setStatus(result);
       } catch (error) {
         if (!silent) onError(error, "retrieve the transfer status");
@@ -103,6 +124,7 @@ export function ChunkSetsCard({
       transfer.transferId,
       chunkSet.ChunkSetId,
       chunkSet.ChunkCount,
+      isMedia,
     );
     if (ok) {
       showToast(
@@ -122,10 +144,10 @@ export function ChunkSetsCard({
   const handleComplete = async (chunkSet: ChunkSetMetadata) => {
     setCompleting((prev) => ({ ...prev, [chunkSet.ChunkSetId]: true }));
     try {
-      const result = await callTransferApi<CompleteChunkSetResult>(
+      const result = await completeChunkSet(
         destination,
-        `/api/transfer/transfers/${encodeURIComponent(transfer.transferId)}/chunksets/${encodeURIComponent(chunkSet.ChunkSetId)}/complete`,
-        { method: "POST" },
+        transfer.transferId,
+        chunkSet.ChunkSetId,
       );
       const fileName = result?.ContentTransferFileName ?? "";
       setRaifFiles((prev) => ({ ...prev, [chunkSet.ChunkSetId]: fileName }));
@@ -164,6 +186,7 @@ export function ChunkSetsCard({
         chunkSet.ChunkSetId,
         chunkId,
         chunkSet.ChunkCount,
+        isMedia,
       );
       showToast("Chunk copied", `Chunk ${chunkId} saved to ${destination.label}.`, "success");
     } catch (error) {
@@ -191,6 +214,26 @@ export function ChunkSetsCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
+        {organization && knownIsMedia === undefined && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border-muted bg-surface-container-low p-3">
+            <p className="text-sm">
+              This attached transfer has no recorded paths. Organization mode
+              needs to know what it contains:
+            </p>
+            <Select
+              value={chosenKind}
+              onValueChange={(value) => setChosenKind(value as "media" | "content")}
+            >
+              <SelectTrigger className="w-56" aria-label="Chunk type">
+                <SelectValue placeholder="Select the chunk type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="content">Content items</SelectItem>
+                <SelectItem value="media">Media Library items</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
@@ -272,6 +315,7 @@ export function ChunkSetsCard({
                         itemsProcessed={progress?.itemsProcessed ?? 0}
                         itemsSkipped={progress?.itemsSkipped ?? 0}
                         singleChunkId={singleChunkId}
+                        kindMissing={needsKind}
                         onSingleChunkIdChange={setSingleChunkId}
                         onToggleAdvanced={() =>
                           setAdvancedFor(advanced ? null : chunkSet.ChunkSetId)
@@ -316,6 +360,8 @@ interface ChunkSetRowProps {
   itemsProcessed: number;
   itemsSkipped: number;
   singleChunkId: string;
+  /** Organization mode without a known chunk type — copying is blocked. */
+  kindMissing: boolean;
   onSingleChunkIdChange: (value: string) => void;
   onToggleAdvanced: () => void;
   onCopy: () => void;
@@ -337,6 +383,7 @@ function ChunkSetRow({
   itemsProcessed,
   itemsSkipped,
   singleChunkId,
+  kindMissing,
   onSingleChunkIdChange,
   onToggleAdvanced,
   onCopy,
@@ -403,7 +450,7 @@ function ChunkSetRow({
                 variant="outline"
                 size="xs"
                 onClick={onCopy}
-                disabled={allCopied}
+                disabled={allCopied || kindMissing}
               >
                 <Icon path={mdiContentCopy} />
                 {failed > 0 || (started && !allCopied)
@@ -453,7 +500,7 @@ function ChunkSetRow({
                 className="h-7 w-20 px-2 py-1 text-xs"
                 aria-label="Chunk ID"
               />
-              <Button variant="outline" size="xs" onClick={onCopySingle} disabled={running}>
+              <Button variant="outline" size="xs" onClick={onCopySingle} disabled={running || kindMissing}>
                 Copy chunk
               </Button>
             </div>

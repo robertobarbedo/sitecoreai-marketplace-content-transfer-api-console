@@ -19,11 +19,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { callTransferApi } from "@/src/utils/transfer-api";
-import type {
-  EnvironmentConnection,
-  ItemChildrenResult,
-} from "@/src/types/transfer";
+import { fetchItemChildren } from "@/src/utils/environment-client";
+import type { EnvironmentConnection } from "@/src/types/transfer";
 
 const ROOT_PATH = "/sitecore";
 
@@ -89,10 +86,7 @@ export function TreePickerDialog({
 
   const fetchChildren = useCallback(
     (path: string) =>
-      callTransferApi<ItemChildrenResult>(source, "/api/authoring/item-children", {
-        method: "POST",
-        body: JSON.stringify({ path, database: database.trim() || "master" }),
-      }),
+      fetchItemChildren(source, path, database.trim() || "master"),
     [source, database],
   );
 

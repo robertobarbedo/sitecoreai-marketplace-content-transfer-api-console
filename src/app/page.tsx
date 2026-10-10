@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { mdiCog, mdiLoading } from "@mdi/js";
+import { mdiCog, mdiEarth, mdiLoading } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -13,7 +13,10 @@ import {
   ToastViewport,
 } from "@/components/ui/toast";
 import { ConnectionGate } from "@/components/connection-gate";
-import { ConnectionsModal } from "@/components/connections/connections-modal";
+import {
+  MODE_LABELS,
+  SettingsDialog,
+} from "@/components/settings/settings-dialog";
 import { EnvironmentPicker } from "@/components/migration/environment-picker";
 import { AutoMigrationTab } from "@/components/migration/auto-migration-tab";
 import { MigrationTab } from "@/components/migration/migration-tab";
@@ -28,7 +31,12 @@ import {
   saveConsoleSettings,
 } from "@/src/utils/sitecore-settings";
 import { isInvalidCredentialsError } from "@/src/utils/transfer-api";
-import type { EnvironmentConnection, TenantInfo } from "@/src/types/transfer";
+import { organizationEnvironments } from "@/src/utils/environment-client";
+import type {
+  EnvironmentConnection,
+  TenantInfo,
+  TransferMode,
+} from "@/src/types/transfer";
 
 type ToastVariant = "default" | "success" | "error" | "warning";
 
@@ -41,6 +49,22 @@ interface ToastState {
 
 /** Remembers the last tenant whose settings the user worked with. */
 const SELECTED_TENANT_KEY = "content-transfer-console.settings-tenant";
+/** Remembers the transfer mode (per-browser convenience). */
+const MODE_KEY = "content-transfer-console.mode";
+
+/** Dialog notice when a dropdown's "another organization" action is used. */
+const CROSS_ORG_NOTICE =
+  "Transferring between organizations requires Cross-Organization mode and automation client credentials for each environment.";
+
+function loadStoredMode(): TransferMode {
+  try {
+    return window.localStorage.getItem(MODE_KEY) === "cross-org"
+      ? "cross-org"
+      : "organization";
+  } catch {
+    return "organization";
+  }
+}
 
 export default function StandaloneExtension() {
   const { client, error, isInitialized } = useMarketplaceClient();
@@ -55,7 +79,12 @@ export default function StandaloneExtension() {
   >({});
   const [bootstrapped, setBootstrapped] = useState(false);
 
-  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  // Organization = installed environments over the SDK (no credentials);
+  // Cross-Organization = stored connections. The switch lives in settings.
+  const [mode, setMode] = useState<TransferMode>("organization");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("transfer");
   const [sourceId, setSourceId] = useState("");
   const [destinationId, setDestinationId] = useState("");
   // While a transfer pipeline runs (Quick Transfer or an executing saved
@@ -75,6 +104,15 @@ export default function StandaloneExtension() {
     },
     [],
   );
+
+  useEffect(() => {
+    setMode(loadStoredMode());
+  }, []);
+
+  const openSettings = useCallback((notice: string | null = null) => {
+    setSettingsNotice(notice);
+    setSettingsOpen(true);
+  }, []);
 
   // Once the SDK is up: list the tenants, restore the last save-target
   // selection, and load the stored connections of EVERY tenant.
@@ -163,6 +201,42 @@ export default function StandaloneExtension() {
     return merged;
   }, [tenants, connectionsByTenant]);
 
+  /** What the source/destination dropdowns offer in the current mode. */
+  const environments = useMemo(
+    () =>
+      mode === "organization" ? organizationEnvironments(tenants) : allConnections,
+    [mode, tenants, allConnections],
+  );
+
+  const handleModeChange = useCallback(
+    (next: TransferMode) => {
+      if (transferRunning || next === mode) return;
+      try {
+        window.localStorage.setItem(MODE_KEY, next);
+      } catch {
+        // Remembering the mode is a convenience only.
+      }
+      setMode(next);
+      // Environment ids differ between modes — never carry a selection over.
+      setSourceId("");
+      setDestinationId("");
+      setSettingsNotice(null);
+      // The history tabs disappear in Organization mode — don't leave the
+      // tab strip pointing at one of them.
+      if (
+        next === "organization" &&
+        (activeTab === "item-transfers" || activeTab === "history")
+      ) {
+        setActiveTab("transfer");
+      }
+      showToast(
+        `${MODE_LABELS[next]} mode`,
+        "The source and destination selection was cleared.",
+      );
+    },
+    [transferRunning, mode, activeTab, showToast],
+  );
+
   const handleTenantChange = useCallback((tenantId: string) => {
     try {
       window.localStorage.setItem(SELECTED_TENANT_KEY, tenantId);
@@ -208,7 +282,7 @@ export default function StandaloneExtension() {
           "The environment rejected the stored credentials. Update the connection in settings.",
           "error",
         );
-        setConnectionsOpen(true);
+        openSettings();
       } else {
         showToast(
           `Failed to ${action}`,
@@ -217,12 +291,12 @@ export default function StandaloneExtension() {
         );
       }
     },
-    [showToast],
+    [showToast, openSettings],
   );
 
-  const source = allConnections.find((c) => c.id === sourceId) ?? null;
-  const destination =
-    allConnections.find((c) => c.id === destinationId) ?? null;
+  const source = environments.find((c) => c.id === sourceId) ?? null;
+  const destination = environments.find((c) => c.id === destinationId) ?? null;
+  const organizationMode = mode === "organization";
   const pairReady = !!source && !!destination && source.id !== destination.id;
 
   // ---- Render states ----
@@ -297,31 +371,62 @@ export default function StandaloneExtension() {
                 </p>
               </div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setConnectionsOpen(true)}
-              disabled={transferRunning}
-              aria-label="Manage environment connections"
-            >
-              <Icon path={mdiCog} />
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* The mode switch is tucked into settings, so flag the
+                  non-default mode where it can't be missed. */}
+              {!organizationMode && (
+                <button
+                  type="button"
+                  onClick={() => openSettings()}
+                  disabled={transferRunning}
+                  className="flex cursor-pointer items-center gap-1 rounded-full bg-primary-bg px-2.5 py-1 text-xs font-semibold text-primary-fg hover:bg-primary-bg-active disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Transfers use stored credentials and may cross organizations. Click to change."
+                >
+                  <Icon path={mdiEarth} size={0.6} />
+                  {MODE_LABELS["cross-org"]}
+                </button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => openSettings()}
+                disabled={transferRunning}
+                aria-label="Settings"
+              >
+                <Icon path={mdiCog} />
+              </Button>
+            </div>
           </header>
 
-          {allConnections.length === 0 ? (
-            <ConnectionGate onConfigure={() => setConnectionsOpen(true)} />
+          {!organizationMode && allConnections.length === 0 ? (
+            <ConnectionGate
+              onConfigure={() => openSettings()}
+              onUseOrganization={() => handleModeChange("organization")}
+            />
           ) : (
             <>
               <EnvironmentPicker
-                connections={allConnections}
+                environments={environments}
+                mode={mode}
                 sourceId={sourceId}
                 destinationId={destinationId}
                 onSourceChange={setSourceId}
                 onDestinationChange={setDestinationId}
+                onAction={() =>
+                  openSettings(organizationMode ? CROSS_ORG_NOTICE : null)
+                }
                 disabled={transferRunning}
               />
+              {organizationMode && tenants.length < 2 && (
+                <p className="-mt-2 text-sm text-text-subtle">
+                  This app is installed on only one environment. Install it on
+                  another environment of your organization, or choose
+                  &quot;Transfer to another organization…&quot; to use stored
+                  credentials.
+                </p>
+              )}
 
-              <Tabs defaultValue="transfer">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
                   <TabsTrigger value="transfer" disabled={transferRunning}>
                     Quick Transfer
@@ -335,12 +440,18 @@ export default function StandaloneExtension() {
                   <TabsTrigger value="advanced" disabled={transferRunning}>
                     Advanced
                   </TabsTrigger>
-                  <TabsTrigger value="item-transfers" disabled={transferRunning}>
-                    Transfer Details History
-                  </TabsTrigger>
-                  <TabsTrigger value="history" disabled={transferRunning}>
-                    Transfer Timeline
-                  </TabsTrigger>
+                  {/* Item Transfer list/history endpoints aren't in the SDK —
+                      these tabs exist only in Cross-Organization mode. */}
+                  {!organizationMode && (
+                    <>
+                      <TabsTrigger value="item-transfers" disabled={transferRunning}>
+                        Transfer Details History
+                      </TabsTrigger>
+                      <TabsTrigger value="history" disabled={transferRunning}>
+                        Transfer Timeline
+                      </TabsTrigger>
+                    </>
+                  )}
                 </TabsList>
                 {/* forceMount keeps a running automatic migration alive when
                     the user switches tabs (Radix hides it via `hidden`). */}
@@ -371,29 +482,33 @@ export default function StandaloneExtension() {
                     <SelectionHint text="Select a source and a (different) destination environment above to start a migration." />
                   )}
                 </TabsContent>
-                <TabsContent value="item-transfers">
-                  {destination ? (
-                    <ItemTransfersTab
-                      key={destination.id}
-                      destination={destination}
-                      onError={handleApiError}
-                      showToast={showToast}
-                    />
-                  ) : (
-                    <SelectionHint text="Select a destination environment above to inspect its item transfers." />
-                  )}
-                </TabsContent>
-                <TabsContent value="history">
-                  {destination ? (
-                    <HistoryTab
-                      key={destination.id}
-                      destination={destination}
-                      onError={handleApiError}
-                    />
-                  ) : (
-                    <SelectionHint text="Select a destination environment above to inspect its consumption history." />
-                  )}
-                </TabsContent>
+                {!organizationMode && (
+                  <>
+                    <TabsContent value="item-transfers">
+                      {destination ? (
+                        <ItemTransfersTab
+                          key={destination.id}
+                          destination={destination}
+                          onError={handleApiError}
+                          showToast={showToast}
+                        />
+                      ) : (
+                        <SelectionHint text="Select a destination environment above to inspect its item transfers." />
+                      )}
+                    </TabsContent>
+                    <TabsContent value="history">
+                      {destination ? (
+                        <HistoryTab
+                          key={destination.id}
+                          destination={destination}
+                          onError={handleApiError}
+                        />
+                      ) : (
+                        <SelectionHint text="Select a destination environment above to inspect its consumption history." />
+                      )}
+                    </TabsContent>
+                  </>
+                )}
                 {/* forceMount so switching tabs doesn't kill an executing
                     saved transfer (same reason as the transfer tab). */}
                 <TabsContent value="saved" forceMount>
@@ -401,7 +516,9 @@ export default function StandaloneExtension() {
                     <SavedTransfersTab
                       client={client}
                       tenants={tenants}
-                      connections={allConnections}
+                      mode={mode}
+                      environments={environments}
+                      onOpenSettings={openSettings}
                       onError={handleApiError}
                       showToast={showToast}
                       onRunningChange={setSavedRunning}
@@ -418,9 +535,16 @@ export default function StandaloneExtension() {
             </>
           )}
 
-          <ConnectionsModal
-            open={connectionsOpen}
-            onOpenChange={setConnectionsOpen}
+          <SettingsDialog
+            open={settingsOpen}
+            onOpenChange={(open) => {
+              setSettingsOpen(open);
+              if (!open) setSettingsNotice(null);
+            }}
+            mode={mode}
+            onModeChange={handleModeChange}
+            modeLocked={transferRunning}
+            notice={settingsNotice}
             connections={tenantConnections}
             onSave={handleSaveConnections}
             tenants={tenants}

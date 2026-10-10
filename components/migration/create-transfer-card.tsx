@@ -28,8 +28,16 @@ import {
 } from "@/components/ui/select";
 import { EnvBadge } from "@/components/badges";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
-import { callTransferApi } from "@/src/utils/transfer-api";
-import type { RecentTransfer } from "@/src/utils/recent-transfers";
+import {
+  createTransfer,
+  dataTreesMediaKind,
+  isOrganizationEnvironment,
+  modeOf,
+} from "@/src/utils/environment-client";
+import {
+  recentTransferMode,
+  type RecentTransfer,
+} from "@/src/utils/recent-transfers";
 import type {
   CreateTransferInput,
   DataTree,
@@ -87,6 +95,16 @@ export function CreateTransferCard({
   const [creating, setCreating] = useState(false);
   const [attachId, setAttachId] = useState("");
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
+  const organization = isOrganizationEnvironment(source);
+  // Organization mode (SDK): master only, and one chunk type per transfer —
+  // the SDK cannot read IsMedia from the chunk response.
+  const mixedMedia =
+    organization &&
+    trees.some((t) => t.ItemPath.trim() !== "") &&
+    dataTreesMediaKind(trees.filter((t) => t.ItemPath.trim() !== "")) === null;
+  const modeRecentTransfers = recentTransfers.filter(
+    (t) => recentTransferMode(t) === modeOf(source),
+  );
 
   const updateTree = (index: number, patch: Partial<DataTree>) => {
     setTrees((prev) =>
@@ -99,7 +117,8 @@ export function CreateTransferCard({
     /^[0-9a-f-]{36}$/i.test(transferId.trim()) &&
     database.trim() !== "" &&
     trees.length > 0 &&
-    trees.every((t) => t.ItemPath.trim().startsWith("/sitecore"));
+    trees.every((t) => t.ItemPath.trim().startsWith("/sitecore")) &&
+    !mixedMedia;
 
   const buildRecentEntry = (id: string, dataTrees: DataTree[]): RecentTransfer => ({
     transferId: id,
@@ -110,6 +129,10 @@ export function CreateTransferCard({
     sourceLabel: source.label,
     destinationLabel: destination.label,
     dataTrees,
+    mode: modeOf(source),
+    ...(organization && dataTrees.length > 0
+      ? { isMedia: dataTreesMediaKind(dataTrees) ?? undefined }
+      : {}),
   });
 
   const handleCreate = async () => {
@@ -123,10 +146,7 @@ export function CreateTransferCard({
       },
     };
     try {
-      await callTransferApi(source, "/api/transfer/transfers", {
-        method: "POST",
-        body: JSON.stringify(input),
-      });
+      await createTransfer(source, input);
       showToast(
         "Transfer created",
         `Operation ${id} accepted by ${source.label}. Retrieve its status to see the chunk sets.`,
@@ -148,7 +168,7 @@ export function CreateTransferCard({
     setAttachId("");
   };
 
-  const reusedId = recentTransfers.some(
+  const reusedId = modeRecentTransfers.some(
     (t) => t.transferId === transferId.trim().toLowerCase(),
   );
 
@@ -202,11 +222,17 @@ export function CreateTransferCard({
             </label>
             <Input
               id="transfer-db"
-              value={database}
+              value={organization ? "master" : database}
               autoComplete="off"
               onChange={(e) => setDatabase(e.target.value)}
               placeholder="master"
+              disabled={organization}
             />
+            {organization && (
+              <p className="text-xs text-text-subtle">
+                Organization mode always transfers from the master database.
+              </p>
+            )}
           </div>
         </div>
 
@@ -298,6 +324,14 @@ export function CreateTransferCard({
               tree in the destination — use with care.
             </p>
           </div>
+          {mixedMedia && (
+            <p className="text-xs text-danger-fg">
+              In Organization mode a step-by-step transfer can&apos;t mix Media
+              Library paths with other content — create one transfer for the
+              media paths and another for the rest. (Quick Transfer and saved
+              transfers split them automatically.)
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -336,10 +370,10 @@ export function CreateTransferCard({
           >
             Attach
           </Button>
-          {recentTransfers.length > 0 && (
+          {modeRecentTransfers.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <Icon path={mdiHistory} size={0.7} className="text-text-subtle" />
-              {recentTransfers.slice(0, 5).map((t) => (
+              {modeRecentTransfers.slice(0, 5).map((t) => (
                 <button
                   key={t.transferId}
                   type="button"

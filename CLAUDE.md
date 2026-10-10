@@ -31,10 +31,58 @@ attempt runtime testing.** Verification is limited to:
   Standalone apps are **global** (not per tenant): `getTenants()`
   (sitecore-graphql.ts) maps `application.context.resourceAccess` to a tenant
   list (max ~3). The tenant selection ("Save in Environment:" buttons in the
-  connections modal; remembered in localStorage) only chooses WHERE settings
+  settings dialog; remembered in localStorage) only chooses WHERE settings
   are saved/edited — on startup the page loads the connections of EVERY
-  tenant (`connectionsByTenant` in page.tsx) and the source/destination
-  dropdowns always offer the merged list (`allConnections`, deduped by id).
+  tenant (`connectionsByTenant` in page.tsx) and, in Cross-Organization mode,
+  the source/destination dropdowns offer the merged list (`allConnections`,
+  deduped by id).
+- **Two transfer modes** (`TransferMode` in types/transfer.ts; per-browser
+  choice in localStorage, default `organization`):
+  - **Organization** — the installed environments
+    (`organizationEnvironments(tenants)`: `EnvironmentConnection` with
+    `kind: "organization"` + `contextId`, id = tenantId, never stored), every
+    call over the Marketplace SDK. No credentials.
+  - **Cross-Organization** (`cross-org`) — the stored connections and this
+    app's own API routes (everything below about credentials, tokens and
+    encryption applies to this mode only).
+  - All transfer operations go through `src/utils/environment-client.ts`,
+    which dispatches on `environment.kind`. **A transfer never mixes
+    transports** (SDK bytes live in the browser, REST bytes on the server, and
+    Vercel's ~4.5 MB function body limit rules out relaying 90–200 MB chunks
+    between them) — `copyChunkBetween` throws on a mixed pair.
+  - The mode switch lives ONLY in the settings dialog
+    (`components/settings/settings-dialog.tsx`, formerly the connections
+    modal). The last item of every source/destination dropdown
+    (`EnvironmentSelect` in environment-picker.tsx) is an ACTION, never a
+    value: "Transfer from/to another organization…" (Organization) or "Manage
+    environments…" (Cross-Org) — it opens settings and keeps the selection.
+    Switching modes clears source/destination; the switch is locked while a
+    transfer runs. A Cross-Organization badge in the header flags the
+    non-default mode.
+  - SDK quirks (verified in the `__TestOnly/copied-tool` reference app):
+    pass the raw Blob to `saveChunk` (an ArrayBuffer serializes to `{}`),
+    always send `isMedia` (omitting it ⇒ 405), `consumeFile` takes
+    `blob://<name>` + `databaseName` while `getBlobState` takes the RAW name,
+    and the bridge ignores per-call `timeoutMs` beyond its own ceiling (init
+    timeout is 10 min; chunk ops retry). SDK pins: client ^0.3.5 + xmc
+    **0.4.2 exactly** (xmc 0.4.3 needs client 0.4).
+  - SDK `getChunk` hides the `IsMedia` header ⇒ Organization mode derives it
+    from paths (`isMediaPath`): `useAutoMigration` splits media / non-media
+    trees into separate sub-transfers (`state.transferIds`), the Advanced
+    create card rejects mixed trees, and an attached transfer without trees
+    asks for the chunk type. Organization consumption is monitored with
+    `getBlobState` (`blobStateToConsumption`); cleanup deletes the transfer
+    only (the SDK can't discard blobs). Advanced step 3 uses
+    `organization-consume-card.tsx`.
+  - Item Transfer list/history/blob-list/discard/retry are REST-only: the
+    Transfer Details History and Transfer Timeline tabs are hidden in
+    Organization mode (the Tabs are controlled; switching to Organization
+    while one is active falls back to Quick Transfer).
+  - `SavedTransfer.mode` (absent ⇒ `cross-org`) and `RecentTransfer.mode`
+    tie entries to their mode's id space; entries of the other mode are
+    dimmed and their Execute/Edit open settings with a switch notice.
+    Reconcile/publish map an Organization destination to its tenant by
+    `contextId` (exact) before the host/label heuristics.
 - All sibling folders under `C:\Marketplace` are reference material only —
   never modify them. This app mirrors the architecture of
   `sitecoreai-marketplace-experience-edge-admin-console`.
@@ -57,7 +105,7 @@ attempt runtime testing.** Verification is limited to:
   endpoint** — decryption happens only inside `transferFetch` (client.ts)
   right before the token exchange. Legacy plaintext secrets must keep
   passing through `decryptSecret()` unchanged. Missing key ⇒ plaintext
-  fallback with a warning in the connections modal; decrypt failures map to
+  fallback with a warning in the settings dialog; decrypt failures map to
   the `encryption_error` typed error.
 - The chunk copy route buffers each chunk in server memory and forwards the
   bytes untouched (media = compressed, content = encrypted; the Save endpoint

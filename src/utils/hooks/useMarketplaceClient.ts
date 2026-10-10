@@ -46,7 +46,10 @@ async function getMarketplaceClient() {
 
   const config = {
     target: window.parent,
-     modules: [XMC],
+    modules: [XMC],
+    // Organization-mode chunk copies move 90–200 MB chunks through the
+    // PostMessage bridge; the default timeout is far too short.
+    timeout: 10 * 60 * 1000,
   };
 
   client = await ClientSDK.init(config);
@@ -54,6 +57,18 @@ async function getMarketplaceClient() {
     "event",
     "marketplace_client_ready"
   );
+  return client;
+}
+
+/**
+ * The initialized SDK client, for non-React code (the Organization-mode
+ * transport). Throws if called before useMarketplaceClient finished init —
+ * the page renders nothing that transfers until then.
+ */
+export function getInitializedMarketplaceClient(): ClientSDK {
+  if (!client) {
+    throw new Error("The Marketplace SDK is not initialized yet.");
+  }
   return client;
 }
 

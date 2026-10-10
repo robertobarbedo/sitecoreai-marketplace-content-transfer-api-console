@@ -89,7 +89,7 @@ export function AutoMigrationTab({
   const [confirmStartOpen, setConfirmStartOpen] = useState(false);
 
   // Surface terminal transitions once (toast on success, onError on failure —
-  // which also reopens the connections modal for credential problems).
+  // which also reopens the settings dialog for credential problems).
   const reportedStageRef = useRef<AutoMigrationStage>("idle");
   useEffect(() => {
     if (state.stage === reportedStageRef.current) return;
@@ -239,9 +239,9 @@ export function AutoMigrationTab({
         <Card style="outline" padding="md">
           <CardHeader>
             <CardTitle>Progress</CardTitle>
-            {state.transferId && (
+            {state.transferIds.length > 0 && (
               <CardDescription className="font-mono text-xs">
-                Transfer {state.transferId}
+                Transfer {state.transferIds.join(" · ")}
               </CardDescription>
             )}
           </CardHeader>
