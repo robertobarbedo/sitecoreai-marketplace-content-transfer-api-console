@@ -581,3 +581,88 @@ export async function fetchItemChildren(
       }
     : { item: null, children: [] };
 }
+
+// ---------------------------------------------------------------------------
+// Backup & Restore (Organization mode only)
+// ---------------------------------------------------------------------------
+
+function requireOrganization(environment: EnvironmentConnection, action: string) {
+  if (!isOrganizationEnvironment(environment)) {
+    // Cross-org chunk bytes live on the server, and Vercel's ~4.5 MB function
+    // body limit rules out moving 90–200 MB chunks to/from the browser.
+    throw new Error(`${action} is only available in Organization mode.`);
+  }
+}
+
+/** Downloads one raw chunk from the source into the browser (backup). */
+export async function downloadChunk(
+  source: EnvironmentConnection,
+  transferId: string,
+  chunksetId: string,
+  chunkId: number,
+): Promise<Blob> {
+  requireOrganization(source, "Downloading chunks");
+  return sdkGetChunk(source, transferId, chunksetId, chunkId);
+}
+
+/** Uploads one raw chunk to the destination (restore). */
+export async function uploadChunk(
+  destination: EnvironmentConnection,
+  transferId: string,
+  chunksetId: string,
+  chunkId: number,
+  body: Blob,
+  isMedia: boolean,
+): Promise<void> {
+  requireOrganization(destination, "Uploading chunks");
+  await sdkSaveChunk(destination, transferId, chunksetId, chunkId, body, isMedia);
+}
+
+/** Authoring GraphQL against an installed environment; returns `data`. */
+export async function authoringGraphql<T>(
+  environment: EnvironmentConnection,
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T | null> {
+  requireOrganization(environment, "Authoring GraphQL");
+  const response = await sdk().mutate("xmc.authoring.graphql", {
+    params: {
+      query: { sitecoreContextId: contextOf(environment) },
+      body: { query, variables },
+    },
+  });
+  const envelope = response as unknown as {
+    error?: unknown;
+    data?: { data?: T; errors?: { message?: string }[] };
+  };
+  if (envelope.error) {
+    throw new SdkTransferError(describeSdkError(envelope.error));
+  }
+  if (envelope.data?.errors?.length) {
+    throw new SdkTransferError(
+      envelope.data.errors
+        .map((e) => e.message)
+        .filter(Boolean)
+        .join("; "),
+    );
+  }
+  return envelope.data?.data ?? null;
+}
+
+/** The signed-in SitecoreAI user (for backup attribution); null if unknown. */
+export async function getCurrentUser(): Promise<{
+  id: string;
+  name: string;
+  email: string;
+} | null> {
+  try {
+    const result = await sdk().query("host.user");
+    const user = (result as { data?: Record<string, unknown> })?.data;
+    if (!user) return null;
+    const text = (key: string) =>
+      typeof user[key] === "string" ? (user[key] as string) : "";
+    return { id: text("id"), name: text("name"), email: text("email") };
+  } catch {
+    return null;
+  }
+}

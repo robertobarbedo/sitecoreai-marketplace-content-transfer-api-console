@@ -103,6 +103,11 @@ interface EnvironmentPickerProps {
   onAction: () => void;
   /** Locks both selects (e.g. while a transfer is running). */
   disabled?: boolean;
+  /**
+   * Skip the "must be different" warning — for views that use only one side
+   * (Backup & Restore: backup reads the source, restore the destination).
+   */
+  allowSame?: boolean;
 }
 
 /**
@@ -118,8 +123,9 @@ export function EnvironmentPicker({
   onDestinationChange,
   onAction,
   disabled = false,
+  allowSame = false,
 }: EnvironmentPickerProps) {
-  const same = sourceId !== "" && sourceId === destinationId;
+  const same = !allowSame && sourceId !== "" && sourceId === destinationId;
 
   return (
     <div className="rounded-xl border border-border-muted bg-white p-4">

@@ -24,6 +24,7 @@ import { ItemTransfersTab } from "@/components/item-transfers/item-transfers-tab
 import { HistoryTab } from "@/components/history/history-tab";
 import { ReconciliationTab } from "@/components/reconciliation/reconciliation-tab";
 import { SavedTransfersTab } from "@/components/saved-transfers/saved-transfers-tab";
+import { BackupRestoreTab } from "@/components/backup-restore/backup-restore-tab";
 import { useMarketplaceClient } from "@/src/utils/hooks/useMarketplaceClient";
 import { getTenants } from "@/src/utils/sitecore-graphql";
 import {
@@ -91,7 +92,8 @@ export default function StandaloneExtension() {
   // transfer), the whole interface locks — only its Cancel button stays live.
   const [quickRunning, setQuickRunning] = useState(false);
   const [savedRunning, setSavedRunning] = useState(false);
-  const transferRunning = quickRunning || savedRunning;
+  const [backupRunning, setBackupRunning] = useState(false);
+  const transferRunning = quickRunning || savedRunning || backupRunning;
   const [toast, setToast] = useState<ToastState>({
     open: false,
     title: "",
@@ -223,9 +225,12 @@ export default function StandaloneExtension() {
       setSettingsNotice(null);
       // The history tabs disappear in Organization mode — don't leave the
       // tab strip pointing at one of them.
+      // Mode-specific tabs disappear — don't leave the tab strip pointing at
+      // one of them.
       if (
-        next === "organization" &&
-        (activeTab === "item-transfers" || activeTab === "history")
+        (next === "organization" &&
+          (activeTab === "item-transfers" || activeTab === "history")) ||
+        (next === "cross-org" && activeTab === "backup")
       ) {
         setActiveTab("transfer");
       }
@@ -416,6 +421,7 @@ export default function StandaloneExtension() {
                   openSettings(organizationMode ? CROSS_ORG_NOTICE : null)
                 }
                 disabled={transferRunning}
+                allowSame={activeTab === "backup"}
               />
               {organizationMode && tenants.length < 2 && (
                 <p className="-mt-2 text-sm text-text-subtle">
@@ -437,9 +443,13 @@ export default function StandaloneExtension() {
                   <TabsTrigger value="reconciliation" disabled={transferRunning}>
                     Reconciliation
                   </TabsTrigger>
-                  <TabsTrigger value="advanced" disabled={transferRunning}>
-                    Advanced
-                  </TabsTrigger>
+                  {/* Backup/restore moves chunks through the browser — only
+                      possible over the SDK (Organization mode). */}
+                  {organizationMode && (
+                    <TabsTrigger value="backup" disabled={transferRunning}>
+                      Backup &amp; Restore
+                    </TabsTrigger>
+                  )}
                   {/* Item Transfer list/history endpoints aren't in the SDK —
                       these tabs exist only in Cross-Organization mode. */}
                   {!organizationMode && (
@@ -452,6 +462,9 @@ export default function StandaloneExtension() {
                       </TabsTrigger>
                     </>
                   )}
+                  <TabsTrigger value="advanced" disabled={transferRunning}>
+                    Advanced
+                  </TabsTrigger>
                 </TabsList>
                 {/* forceMount keeps a running automatic migration alive when
                     the user switches tabs (Radix hides it via `hidden`). */}
@@ -508,6 +521,17 @@ export default function StandaloneExtension() {
                       )}
                     </TabsContent>
                   </>
+                )}
+                {organizationMode && (
+                  // forceMount keeps a running backup/restore alive.
+                  <TabsContent value="backup" forceMount>
+                    <BackupRestoreTab
+                      source={source}
+                      destination={destination}
+                      showToast={showToast}
+                      onRunningChange={setBackupRunning}
+                    />
+                  </TabsContent>
                 )}
                 {/* forceMount so switching tabs doesn't kill an executing
                     saved transfer (same reason as the transfer tab). */}

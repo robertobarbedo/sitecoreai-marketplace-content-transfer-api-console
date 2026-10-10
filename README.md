@@ -42,6 +42,7 @@ icon); the last option of every source/destination dropdown —
 | Transport | Marketplace SDK (`xmc.contentTransfer.*`, `xmc.authoring.graphql`) | This app's own API routes (below) |
 | Chunk copy | In the browser: SDK `getChunk` → raw Blob → SDK `saveChunk` | Server-side copy route |
 | Transfer Details History / Transfer Timeline / blob list & discard | Not available (the SDK doesn't expose those Item Transfer endpoints) | Available |
+| Backup & Restore tab | Available | Not available |
 
 A transfer never mixes the two: both environments come from the same mode.
 Switching modes clears the source/destination selection, and the mode can't
@@ -58,6 +59,33 @@ Organization-mode notes:
   transfer operation only — consumed `.raif` blobs stay on the destination
   (the SDK can't discard them).
 - Always the `master` database on the source side.
+
+## Backup & Restore (Organization mode)
+
+The **Backup & Restore** tab saves content to a ZIP you keep and replays it
+later — into the same environment (rollback) or into any other environment
+where the app is installed, including one in another organization, without
+credentials.
+
+- **Backup** (from the selected *source*): name it, pick paths with scope
+  and merge strategy (stored in the backup; it decides how the backup is
+  applied on restore), start. The source packages the content, every chunk
+  is downloaded into the ZIP, then the staged transfer on the source is
+  deleted. The browser offers a save dialog when allowed, otherwise the ZIP
+  downloads normally.
+- **Restore** (into the selected *destination*): choose a ZIP — the manifest
+  is shown with the current state of each path on the destination, plus
+  warnings for same-environment restores and "Override existing tree".
+  After typing `RESTORE` the chunks are uploaded (verified by size and
+  SHA-256; cancellable), assembled and consumed into `master` (no longer
+  cancellable), and the import is monitored to the end.
+- ZIP layout: `manifest.json` + `chunks/{media|content}/<chunkSetId>/<n>.raif`
+  — the raw transfer chunks (an assembled `.raif` can't be downloaded from
+  any API). The manifest is compatible with the v1 format of the sibling
+  backup app.
+- Not available in Cross-Organization mode: chunk bytes there live on the
+  server, and Vercel's ~4.5 MB function body limit rules out moving
+  90–200 MB chunks to or from the browser.
 
 ## How authentication works (Cross-Organization mode)
 

@@ -83,6 +83,28 @@ attempt runtime testing.** Verification is limited to:
     dimmed and their Execute/Edit open settings with a switch notice.
     Reconcile/publish map an Organization destination to its tenant by
     `contextId` (exact) before the host/label heuristics.
+- **Backup & Restore** tab (`components/backup-restore/backup-restore-tab.tsx`,
+  value `backup`, `forceMount`ed, **Organization mode only** — chunks must
+  pass through the browser, which only the SDK allows; switching to
+  Cross-Org while it is active falls back to Quick Transfer). Backup
+  (`useContentBackup`) reads the picker's SOURCE: create transfer(s) (media /
+  content split) → snapshot → `downloadChunk` each chunk into a ZIP →
+  manifest last → delete the source transfer(s) (also on failure). Restore
+  (`useContentRestore`) writes into the picker's DESTINATION: verify each
+  chunk (size + optional SHA-256) and `uploadChunk` with the RECORDED
+  transferId/chunkSetId (cancellable) → complete + consume each set (NOT
+  cancellable — an assembled, unconsumed .raif can't be removed via the SDK)
+  → poll `getBlobState` → best-effort delete of the transfer ids on the
+  destination. Archive format (`src/utils/backup-archive.ts`): store-only
+  zip64 (`@zip.js/zip.js`, no web workers), `manifest.json` +
+  `chunks/{media|content}/<chunkSetId>/<n>.raif` (RAW chunks, not an
+  assembled .raif), manifest v1 compatible with the `__TestOnly/copied-tool`
+  backup app (camelCase dataTrees; our `sha256`/`app`/`database` fields are
+  optional on read). The archive writer must be created first thing in the
+  click handler (user gesture) — save dialog → OPFS staging → in-memory
+  download fallback. The merge strategy is chosen at backup time (baked into
+  the package). Recent backups are a localStorage convenience
+  (`recent-backups.ts`).
 - All sibling folders under `C:\Marketplace` are reference material only —
   never modify them. This app mirrors the architecture of
   `sitecoreai-marketplace-experience-edge-admin-console`.
