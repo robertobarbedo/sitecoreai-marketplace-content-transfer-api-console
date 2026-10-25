@@ -6,9 +6,13 @@ const AUDIENCE = "https://api.sitecorecloud.io";
 /** Safety margin subtracted from the token lifetime (seconds). */
 const EXPIRY_MARGIN_SECONDS = 60;
 
+/**
+ * The token endpoint or environment refused the credentials. `detail` is the
+ * raw upstream body: log it server-side, never return it to the browser.
+ */
 export class InvalidCredentialsError extends Error {
-  constructor(detail?: string) {
-    super(detail ?? "Invalid client credentials");
+  constructor(public detail: string = "") {
+    super("Invalid client credentials");
     this.name = "InvalidCredentialsError";
   }
 }

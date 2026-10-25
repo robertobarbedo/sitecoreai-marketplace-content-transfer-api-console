@@ -157,11 +157,12 @@ export async function getEncryptionStatus(): Promise<boolean> {
 }
 
 /**
- * Encrypts a secret for one connection through the server's encrypt-only
- * route (there is no decrypt counterpart). Plaintext and older stored
- * formats come back in the current, connection-bound format; current values
- * come back unchanged. Throws (encryption_error) when the server has no key
- * — secrets are never stored unencrypted.
+ * Encrypts a secret for one connection (and the signed-in user's
+ * organization) through the server's encrypt-only route (there is no decrypt
+ * counterpart). Plaintext comes back in the current, organization-bound
+ * format; current values come back unchanged. Throws (encryption_error) when
+ * the server has no key or the value is older ciphertext, which must be
+ * entered again — secrets are never stored unencrypted.
  */
 export async function encryptSecretRemote(
   secret: string,
@@ -178,7 +179,7 @@ export async function encryptSecretRemote(
 }
 
 /** Mirrors PREFIX in src/lib/transfer/crypto.ts. */
-const ENCRYPTED_PREFIX = "enc:v2:";
+const ENCRYPTED_PREFIX = "enc:v3:";
 
 /** True for values already in the current stored-ciphertext format. */
 export function isEncryptedSecret(value: string): boolean {
@@ -187,7 +188,8 @@ export function isEncryptedSecret(value: string): boolean {
 
 /**
  * Returns the connections with every secret in the current encrypted format
- * (plaintext and older formats re-encrypted for their host + client ID).
+ * (plaintext encrypted for the organization + host + client ID). Throws for
+ * older ciphertext, which must be entered again.
  */
 export async function sealConnections(
   connections: EnvironmentConnection[],

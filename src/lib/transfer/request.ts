@@ -10,6 +10,7 @@ import {
   type TransferEnvironment,
 } from "./client";
 import { SecretDecryptionError } from "./crypto";
+import { readOrganizationId } from "./org";
 
 /**
  * Header names carrying the target environment for a proxied call. Routes
@@ -40,15 +41,22 @@ function readEnvironmentFromHeaders(
   request: Request,
   headers: HeaderSet,
 ): TransferEnvironment | null {
+  const organizationId = readOrganizationId(request);
   const host = request.headers.get(headers.host)?.trim().toLowerCase();
   const clientId = request.headers.get(headers.clientId);
   const clientSecret = request.headers.get(headers.clientSecret);
 
-  if (!host || !clientId || !clientSecret || !isValidHost(host)) {
+  if (
+    !organizationId ||
+    !host ||
+    !clientId ||
+    !clientSecret ||
+    !isValidHost(host)
+  ) {
     return null;
   }
 
-  return { host, clientId, clientSecret };
+  return { organizationId, host, clientId, clientSecret };
 }
 
 export function readEnvironment(request: Request): TransferEnvironment | null {
@@ -85,13 +93,29 @@ export function missingCredentialsResponse(which?: string): NextResponse {
   });
 }
 
+/** A browser-safe description of an upstream HTTP status. */
+function describeUpstreamStatus(status: number): string {
+  if (status === 400) return "The environment API rejected the request (400).";
+  if (status === 404) return "The environment API could not find the requested resource (404).";
+  if (status === 409) return "The environment API reported a conflict (409).";
+  if (status === 413) return "The request was too large for the environment API (413).";
+  if (status === 429) return "The environment API is rate limiting requests (429). Try again shortly.";
+  if (status >= 500) return `The environment API failed (${status}). Try again later.`;
+  return `The environment API returned an error (${status}).`;
+}
+
 /**
  * Maps errors thrown by transferFetch/readTransferResponse to a JSON error
- * response.
+ * response. Upstream bodies (token endpoint and environment APIs) are logged
+ * server-side only; the browser gets a fixed message per error type, so
+ * nothing the upstream echoes back (internals, request data) leaks out.
  */
 export function transferErrorResponse(error: unknown): NextResponse {
   if (error instanceof InvalidCredentialsError) {
-    return jsonError("invalid_credentials", 401, { detail: error.message });
+    console.error("Credentials rejected upstream:", error.detail);
+    return jsonError("invalid_credentials", 401, {
+      detail: "The environment rejected the automation client credentials.",
+    });
   }
   if (error instanceof UpstreamUnreachableError) {
     return jsonError("upstream_unreachable", 502);
@@ -100,9 +124,10 @@ export function transferErrorResponse(error: unknown): NextResponse {
     return jsonError("encryption_error", 500, { detail: error.message });
   }
   if (error instanceof TransferApiRequestError) {
+    console.error(`Transfer API error (${error.status}):`, error.detail);
     return jsonError("transfer_api_error", error.status, {
       status: error.status,
-      detail: error.detail,
+      detail: describeUpstreamStatus(error.status),
     });
   }
 

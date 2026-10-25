@@ -86,11 +86,13 @@ export async function POST(request: Request) {
     };
 
     if (payload.errors?.length) {
+      // Logged server-side only; GraphQL error messages are upstream output.
+      console.error(
+        "Authoring GraphQL errors:",
+        payload.errors.map((e) => e.message).filter(Boolean).join("; "),
+      );
       return jsonError("transfer_api_error", 502, {
-        detail: payload.errors
-          .map((e) => e.message)
-          .filter(Boolean)
-          .join("; "),
+        detail: "The authoring API could not load the children of this item.",
       });
     }
 

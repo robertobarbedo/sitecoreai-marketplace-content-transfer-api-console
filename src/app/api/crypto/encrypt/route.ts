@@ -5,6 +5,7 @@ import {
   isEncryptionConfigured,
   sealForConnection,
 } from "@/src/lib/transfer/crypto";
+import { readOrganizationId } from "@/src/lib/transfer/org";
 import { jsonError } from "@/src/lib/transfer/request";
 
 /**
@@ -22,11 +23,20 @@ export async function GET() {
 
 /**
  * POST { secret, host, clientId } → { value }: the secret encrypted for that
- * connection. Plaintext and older-format values are (re-)encrypted; current
- * values are returned unchanged once verified to belong to the connection.
- * Fails with encryption_error when no key is configured.
+ * connection and the caller's verified organization. Plaintext is encrypted;
+ * current values are returned unchanged once verified to belong to the
+ * organization + connection; older ciphertext is refused. Fails with
+ * encryption_error when no key is configured.
  */
 export async function POST(request: Request) {
+  // Set by the middleware from the verified token, never by the browser.
+  const organizationId = readOrganizationId(request);
+  if (!organizationId) {
+    return jsonError("validation", 403, {
+      detail: "The organization of the caller is unknown",
+    });
+  }
+
   let body: { secret?: string; host?: string; clientId?: string };
   try {
     body = (await request.json()) as typeof body;
@@ -57,7 +67,7 @@ export async function POST(request: Request) {
 
   try {
     return NextResponse.json({
-      value: sealForConnection(secret, { host, clientId }),
+      value: sealForConnection(secret, { organizationId, host, clientId }),
     });
   } catch (error) {
     if (error instanceof SecretDecryptionError) {

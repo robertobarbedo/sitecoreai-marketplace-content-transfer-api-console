@@ -196,10 +196,11 @@ export default function StandaloneExtension() {
         });
         setConnectionsByTenant(byTenant);
 
-        // Migrate stored secrets that predate the current format (plaintext,
-        // or encrypted without being bound to their host + client ID) by
-        // re-encrypting and re-saving them, once per tenant. Runs in the
-        // background: it waits for sign-in and never blocks the page.
+        // Encrypt stored plaintext secrets and re-save them, once per tenant.
+        // Older ciphertext (not bound to the organization) is refused by the
+        // server, which surfaces as the "enter their secrets again" toast.
+        // Runs in the background: it waits for sign-in and never blocks the
+        // page.
         for (const tenant of list) {
           const stored = byTenant[tenant.tenantId] ?? [];
           if (stored.every((c) => isEncryptedSecret(c.clientSecret))) continue;

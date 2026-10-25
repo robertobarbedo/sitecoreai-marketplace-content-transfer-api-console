@@ -124,16 +124,25 @@ attempt runtime testing.** Verification is limited to:
   `https://{host}`. Tokens are cached server-side only; 401 **and** 403 (the
   documented expired-JWT status) evict + retry once.
 - **Secrets at rest**: client secrets are AES-256-GCM encrypted
-  (`enc:v2:<iv>:<tag>:<data>`, key = 32-byte base64 `CT_ENCRYPTION_KEY` env
-  var, REQUIRED) by `src/lib/transfer/crypto.ts`, with `host|clientId` as
-  GCM AAD — a ciphertext only decrypts for the connection it was sealed for.
+  (`enc:v3:<iv>:<tag>:<data>`, key = 32-byte base64 `CT_ENCRYPTION_KEY` env
+  var, REQUIRED) by `src/lib/transfer/crypto.ts`, with `orgId|host|clientId`
+  as GCM AAD — a ciphertext only decrypts for the organization and
+  connection it was sealed for. `orgId` is the verified `org_id` token claim,
+  forwarded by `src/middleware.ts` in the `x-ct-verified-org-id` header
+  (always overwritten; tokens without an org are refused) — see
+  `src/lib/transfer/org.ts`.
   Invariant: encryption is exposed via the encrypt-only route
   `/api/crypto/encrypt` (POST `{secret, host, clientId}` → `{value}`; never
   returns plaintext); **never add a decrypt endpoint** — decryption happens
   only inside `transferFetch` (client.ts) right before the token exchange.
-  `decryptSecret()` rejects plaintext and `enc:v1:`; no plaintext fallback
-  anywhere. Older values (plaintext / unbound `enc:v1:`) are migrated by
-  `sealConnections` on page load (page.tsx bootstrap) and on every save.
+  `decryptSecret()` rejects plaintext and `enc:v1:`/`enc:v2:`; no plaintext
+  fallback anywhere. Plaintext is encrypted by `sealConnections` on page load
+  (page.tsx bootstrap) and on every save; older ciphertext is NOT migrated
+  (re-sealing would let another org adopt a copied value) — users re-enter
+  those secrets.
+  Upstream error bodies (token endpoint, environment APIs, GraphQL errors)
+  are logged server-side only; `transferErrorResponse` returns fixed,
+  status-based messages to the browser.
   Editing a connection's host or client ID requires re-entering the secret.
   Decrypt failures map to the `encryption_error` typed error.
 - **API auth**: `src/middleware.ts` runs `requireSitecoreUser` on every

@@ -9,14 +9,20 @@ export const ITEM_TRANSFER_BASE = "/sitecore/shell/api/v3/ItemsTransfer";
 
 /**
  * A resolved environment target: host name plus the automation client
- * credentials used to obtain a JWT for it.
+ * credentials used to obtain a JWT for it, and the caller's verified
+ * organization the stored secret must be bound to.
  */
 export interface TransferEnvironment {
+  organizationId: string;
   host: string;
   clientId: string;
   clientSecret: string;
 }
 
+/**
+ * A non-2xx answer from an environment API. `detail` is the raw upstream
+ * body: log it server-side, never return it to the browser.
+ */
 export class TransferApiRequestError extends Error {
   constructor(
     public status: number,
@@ -69,10 +75,11 @@ export async function transferFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  // Stored secrets arrive as `enc:v2:` ciphertext bound to this host and
-  // client ID; they are decrypted only here, server-side, right before the
-  // token exchange. Throws SecretDecryptionError on plaintext, a bad or
-  // missing key, or a ciphertext sealed for another connection.
+  // Stored secrets arrive as `enc:v3:` ciphertext bound to the caller's
+  // organization, this host and client ID; they are decrypted only here,
+  // server-side, right before the token exchange. Throws
+  // SecretDecryptionError on plaintext, a bad or missing key, or a
+  // ciphertext sealed for another organization or connection.
   const clientSecret = decryptSecret(env.clientSecret, env);
 
   const attempt = async (): Promise<Response> => {
