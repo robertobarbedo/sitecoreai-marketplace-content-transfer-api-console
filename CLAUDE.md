@@ -1,0 +1,228 @@
+# Content Transfer Console — notes for Claude Code
+
+## Do NOT run or test this app standalone
+
+SitecoreAI Marketplace apps **cannot run as standalone web apps**. The
+Marketplace SDK (`ClientSDK.init({ target: window.parent })`) requires the app
+to be embedded in an iframe inside SitecoreAI — outside of it, initialization
+hangs/fails and every page is non-functional. The `/api/transfer/*` and
+`/api/item-transfer/*` routes also require real automation client credentials
+to return anything useful.
+
+Therefore: **do not start the dev server, open the app in a browser, or
+attempt runtime testing.** Verification is limited to:
+
+- `npm run build` (type-check + lint + compile) must pass
+- Manual testing happens only inside SitecoreAI after the app is registered
+  in Developer Studio (**standalone** extension point → the root route `/`)
+
+## Project facts
+
+- Wraps two Sitecore APIs (docs are machine-readable at
+  `https://api-docs.sitecore.com/sai/content-transfer-api.md` and
+  `https://api-docs.sitecore.com/sai/item-transfer-api.md`):
+  - **Content Transfer API** (v1): `https://{host}/sitecore/api/content/transfer/v1/...`
+    — create/status/delete run on the SOURCE env; save-chunk/complete-set run
+    on the DESTINATION env; get-chunk runs on the SOURCE.
+  - **Item Transfer API** (v3): `https://{host}/sitecore/shell/api/v3/ItemsTransfer/...`
+    — DESTINATION env only.
+- Based on the marketplace starter kit; only the **standalone** extension
+  point is used, served from the root route (`src/app/page.tsx`).
+  Standalone apps are **global** (not per tenant): `getTenants()`
+  (sitecore-graphql.ts) maps `application.context.resourceAccess` to a tenant
+  list (max ~3). The tenant selection ("Save in Environment:" buttons in the
+  settings dialog; remembered in localStorage) only chooses WHERE settings
+  are saved/edited — on startup the page loads the connections of EVERY
+  tenant (`connectionsByTenant` in page.tsx) and, in Cross-Organization mode,
+  the source/destination dropdowns offer the merged list (`allConnections`,
+  deduped by id).
+- **Two transfer modes** (`TransferMode` in types/transfer.ts; per-browser
+  choice in localStorage, default `organization`):
+  - **Organization** — the installed environments
+    (`organizationEnvironments(tenants)`: `EnvironmentConnection` with
+    `kind: "organization"` + `contextId`, id = tenantId, never stored), every
+    call over the Marketplace SDK. No credentials.
+  - **Cross-Organization** (`cross-org`) — the stored connections and this
+    app's own API routes (everything below about credentials, tokens and
+    encryption applies to this mode only).
+  - All transfer operations go through `src/utils/environment-client.ts`,
+    which dispatches on `environment.kind`. **A transfer never mixes
+    transports** (SDK bytes live in the browser, REST bytes on the server, and
+    Vercel's ~4.5 MB function body limit rules out relaying 90–200 MB chunks
+    between them) — `copyChunkBetween` throws on a mixed pair.
+  - The mode switch lives ONLY in the settings dialog
+    (`components/settings/settings-dialog.tsx`, formerly the connections
+    modal). The last item of every source/destination dropdown
+    (`EnvironmentSelect` in environment-picker.tsx) is an ACTION, never a
+    value: "Transfer from/to another organization…" (Organization) or "Manage
+    environments…" (Cross-Org) — it opens settings and keeps the selection.
+    Switching modes clears source/destination; the switch is locked while a
+    transfer runs. A Cross-Organization badge in the header flags the
+    non-default mode.
+  - SDK quirks (verified in the `__TestOnly/copied-tool` reference app):
+    pass the raw Blob to `saveChunk` (an ArrayBuffer serializes to `{}`),
+    always send `isMedia` (omitting it ⇒ 405), `consumeFile` takes
+    `blob://<name>` + `databaseName` while `getBlobState` takes the RAW name,
+    and the bridge ignores per-call `timeoutMs` beyond its own ceiling (init
+    timeout is 10 min; chunk ops retry). SDK pins: client ^0.3.5 + xmc
+    **0.4.2 exactly** (xmc 0.4.3 needs client 0.4).
+  - SDK `getChunk` hides the `IsMedia` header ⇒ Organization mode derives it
+    from paths (`isMediaPath`): `useAutoMigration` splits media / non-media
+    trees into separate sub-transfers (`state.transferIds`), the Advanced
+    create card rejects mixed trees, and an attached transfer without trees
+    asks for the chunk type. Organization consumption is monitored with
+    `getBlobState` (`blobStateToConsumption`); cleanup deletes the transfer
+    only (the SDK can't discard blobs). Advanced step 3 uses
+    `organization-consume-card.tsx`.
+  - Item Transfer list/history/blob-list/discard/retry are REST-only: the
+    Transfer Details History and Transfer Timeline tabs are hidden in
+    Organization mode (the Tabs are controlled; switching to Organization
+    while one is active falls back to Quick Transfer).
+  - `SavedTransfer.mode` (absent ⇒ `cross-org`) and `RecentTransfer.mode`
+    tie entries to their mode's id space; entries of the other mode are
+    dimmed and their Execute/Edit open settings with a switch notice.
+    Reconcile/publish map an Organization destination to its tenant by
+    `contextId` (exact) before the host/label heuristics.
+- **Backup & Restore** tab (`components/backup-restore/backup-restore-tab.tsx`,
+  value `backup`, `forceMount`ed, **Organization mode only** — chunks must
+  pass through the browser, which only the SDK allows; switching to
+  Cross-Org while it is active falls back to Quick Transfer). Backup
+  (`useContentBackup`) reads the picker's SOURCE: create transfer(s) (media /
+  content split) → snapshot → `downloadChunk` each chunk into a ZIP →
+  manifest last → delete the source transfer(s) (also on failure). Restore
+  (`useContentRestore`) writes into the picker's DESTINATION: verify each
+  chunk (size + optional SHA-256) and `uploadChunk` with the RECORDED
+  transferId/chunkSetId (cancellable) → complete + consume each set (NOT
+  cancellable — an assembled, unconsumed .raif can't be removed via the SDK)
+  → poll `getBlobState` → best-effort delete of the transfer ids on the
+  destination. Archive format (`src/utils/backup-archive.ts`): store-only
+  zip64 (`@zip.js/zip.js`, no web workers), `manifest.json` +
+  `chunks/{media|content}/<chunkSetId>/<n>.raif` (RAW chunks, not an
+  assembled .raif), manifest v1 compatible with the `__TestOnly/copied-tool`
+  backup app (camelCase dataTrees; our `sha256`/`app`/`database` fields are
+  optional on read). The archive writer must be created first thing in the
+  click handler (user gesture) — save dialog → OPFS staging → in-memory
+  download fallback. The merge strategy is chosen at backup time (baked into
+  the package). Recent backups are a localStorage convenience
+  (`recent-backups.ts`). Backup / Restore are switched by an in-tab sidebar
+  (`components/ui/sidebar.tsx` — only the MENU primitives of the Blok
+  Sidebar, no app-shell provider/fixed container; stacks above the content
+  below `md`).
+- All sibling folders under `C:\Marketplace` are reference material only —
+  never modify them. This app mirrors the architecture of
+  `sitecoreai-marketplace-experience-edge-admin-console`.
+- Settings are a **list of environment connections** (label, host, automation
+  client ID/secret), stored in the Sitecore content tree at
+  `/sitecore/system/Modules/Marketplace/ContentTransferConsole/Settings`,
+  JSON in the `Value` field — in the content tree of the **selected settings
+  tenant**. Loads fall back to the legacy pre-Marketplace path
+  (`LEGACY_SETTINGS_ITEM_PATH` in constants.ts); saves always write the new
+  path and ensure both the Marketplace and module folders exist.
+- Browser → own Next.js API routes (env passed via `x-ct-*` headers) → OAuth
+  token (`auth.sitecorecloud.io`, client_credentials, audience
+  `https://api.sitecorecloud.io`, ~24 h expiry) → environment API at
+  `https://{host}`. Tokens are cached server-side only; 401 **and** 403 (the
+  documented expired-JWT status) evict + retry once.
+- **Secrets at rest**: client secrets are AES-256-GCM encrypted
+  (`enc:v2:<iv>:<tag>:<data>`, key = 32-byte base64 `CT_ENCRYPTION_KEY` env
+  var, REQUIRED) by `src/lib/transfer/crypto.ts`, with `host|clientId` as
+  GCM AAD — a ciphertext only decrypts for the connection it was sealed for.
+  Invariant: encryption is exposed via the encrypt-only route
+  `/api/crypto/encrypt` (POST `{secret, host, clientId}` → `{value}`; never
+  returns plaintext); **never add a decrypt endpoint** — decryption happens
+  only inside `transferFetch` (client.ts) right before the token exchange.
+  `decryptSecret()` rejects plaintext and `enc:v1:`; no plaintext fallback
+  anywhere. Older values (plaintext / unbound `enc:v1:`) are migrated by
+  `sealConnections` on page load (page.tsx bootstrap) and on every save.
+  Editing a connection's host or client ID requires re-entering the secret.
+  Decrypt failures map to the `encryption_error` typed error.
+- **API auth**: `src/middleware.ts` runs `requireSitecoreUser` on every
+  `/api/*` route; the browser calls them with `authedFetch`
+  (`src/utils/transfer-api.ts`). `src/lib/marketplace-auth/` is a copy of the
+  shared kit (master in content-publish-inspector) — keep it byte-identical.
+  The page is wrapped in a non-blocking `MarketplaceAuthProvider`
+  (`AuthBoundary` in page.tsx) so Organization mode never waits for sign-in.
+- **Hosts**: `isValidHost` (client.ts) accepts only lowercase
+  `*.sitecorecloud.io` names; headers are lowercased before the check, and
+  `transferFetch` uses `redirect: "error"` so the token can't follow a
+  redirect off-host.
+- The chunk copy route buffers each chunk in server memory and forwards the
+  bytes untouched (media = compressed, content = encrypted; the Save endpoint
+  requires the `isMedia` query param read from the GET response's
+  Content-Disposition header). Never decompress/decrypt/re-encode chunk data.
+- UI: Tailwind CSS v4 + Radix UI + CVA (Blok design language, NOT shadcn).
+  UI primitives copied from the edge-admin-console reference app.
+- Recent transfers (IDs + produced .raif names) are a localStorage
+  convenience; authoritative state always comes from the APIs.
+- The **Content Transfer** tab (automatic mode, `useAutoMigration` +
+  `auto-migration-tab.tsx`; the step-by-step workspace is the **Advanced**
+  tab) chains the same proxy routes client-side:
+  hardcoded `master` database, list-based consumption monitoring (see quirk
+  below), and full cleanup on success (deletes the source transfer op AND
+  discards the consumed blobs). Its TabsContent is `forceMount`ed in
+  `page.tsx` so switching tabs doesn't unmount a running pipeline — keep
+  that. Failed runs stay in recent transfers for the Advanced tab to attach.
+- **API quirk (observed in practice):** `GET /transfers/{transferId}` on the
+  Item Transfer API can return 404 for a blob-name id even while/after the
+  source is consumed. Consumption state must be derived from the
+  `GET /transfers` list (matched by SourceName/Id, case-insensitive); the
+  detail endpoint is best-effort enrichment only. Both the Step 3 monitor and
+  the Item transfers details dialog follow this pattern — keep it when
+  touching them.
+- **API quirk (observed in practice):** `GET /history` can leave `ConsumeDate`
+  unset, serialized as the .NET minimum date `0001-01-01T00:00:00`. The
+  history tab falls back to the Finished event's timestamp, and the shared
+  `formatDate` renders year-1 dates as "—".
+- The **Saved Transfers** tab stores reusable transfer definitions
+  (`SavedTransfer` in types/transfer.ts: name, source/destination connection
+  ids + labels, DataTrees, reconcile flag) as one JSON list in a
+  `SavedTransfers` settings item next to the connections Settings item.
+  **Saves always write to the FIRST tenant in the resource list; loads merge
+  the item from every tenant** (dedupe by id, earlier tenant wins) because a
+  different tenant may have been first in the past. Executing reuses
+  `useAutoMigration` (whose input is now `{ dataTrees: DataTree[] }` — the
+  Content Transfer tab passes a single-tree array) and, when "Reconcile at
+  the end" is set, chains a reconciliation apply against the **destination**
+  environment via the shared engine in `src/utils/reconciliation-apply.ts`
+  (plan → fetch current values → execute; also used by the Reconciliation
+  tab's ApplyView). The destination connection is mapped to its SitecoreAI
+  tenant at execution time by tenantName-substring-of-host, falling back to
+  a label match — an unmatched destination fails the reconcile step with an
+  explicit error (the transfer itself still completes).
+  Its TabsContent is `forceMount`ed like the transfer tab so switching tabs
+  doesn't kill a running execution. Tab labels: the automatic transfer tab is
+  displayed as **Quick Transfer**, the "Item transfers" tab as **Transfer
+  Details History** and the history tab as **Transfer Timeline** (values
+  `transfer`/`item-transfers`/`history` unchanged).
+- Saved transfers can also **publish at the end** (`SavedTransfer.publish`,
+  optional — absent on older entries): after the transfer (and a clean
+  reconcile, when both are set; a failed/partially-failed reconcile SKIPS the
+  publish) the destination is published via `publishItem` authoring GraphQL
+  (`src/utils/publish.ts`, adapted from the publishing-center sibling) — over
+  the Marketplace SDK against the destination's resolved tenant (same
+  `matchEnvironmentToConnection` mapping as reconcile), NOT the stored REST
+  connections. Invariants: `publishSubItems: true`, `publishRelatedItems:
+  false`, `targetDatabases: "experienceedge"`; target `EntireTree` publishes
+  the hardcoded `/sitecore` root, `TransferredPaths` fires one publish per
+  deduped DataTree path; mode `SMART` = Smart, `FULL` = Republish (UI label).
+  Languages come from the destination's `languages` query, falling back to
+  `en` with a visible warning. Progress is observed by diffing
+  `jobs(input:{jobName:"Publish*"})` against a pre-publish baseline of job
+  handles (best-effort: unobservable jobs resolve as "queued", never as
+  failed).
+- The **Reconciliation** tab is a read-only integration with the sibling
+  `sitecoreai-marketplace-content-reconciliation` app: on open it checks every
+  environment (Marketplace SDK authoring GraphQL, not the stored connections)
+  for that app's `Base`/`Secondary` marker items under
+  `/sitecore/system/Modules/Marketplace/ContentReconciliation`. Missing
+  markers / no base / multiple bases ⇒ a status screen telling the user to
+  install/set up the Content Reconciliation app; exactly one Base ⇒ it loads
+  that app's `Data` blob and renders a port of its "Preview and apply
+  changes" view (`components/reconciliation/apply-view.tsx`). Keep the port's
+  invariants from the source app: desired values are keyed by **tenantName**
+  (`storedKeyFor`), the GraphQL escaping includes `\n`/`\r`/`\t` (user-typed
+  values), and Apply re-fetches the item and passes `max(versions)` right
+  before each `updateItem` batch. This tab never creates/repairs the
+  reconciliation storage items — that's the other app's job. Types/blob shape
+  live in `src/types/reconciliation.ts` and must stay in sync with the
+  sibling app.

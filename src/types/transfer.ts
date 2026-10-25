@@ -1,0 +1,335 @@
+/**
+ * Shared types for the Content Transfer API (v1) and Item Transfer API (v3).
+ * Used by both the API route handlers and the client components.
+ */
+
+// ---------------------------------------------------------------------------
+// Marketplace tenants (standalone extension: the app is global, so the user
+// picks which tenant's content tree stores the settings)
+// ---------------------------------------------------------------------------
+
+export interface TenantInfo {
+  tenantId: string;
+  /** Display label shown on the tenant buttons. */
+  label: string;
+  /** sitecoreContextId used by the authoring GraphQL for this tenant. */
+  contextId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Transfer modes
+// ---------------------------------------------------------------------------
+
+/**
+ * organization = transfer between the environments this app is installed on
+ * (Marketplace SDK, no credentials). cross-org = transfer between any
+ * environments, including other organizations, through the app's own API
+ * routes with stored automation client credentials. A transfer never mixes
+ * the two transports.
+ */
+export type TransferMode = "organization" | "cross-org";
+
+// ---------------------------------------------------------------------------
+// Environment connections (stored in the content tree, selected in the UI)
+// ---------------------------------------------------------------------------
+
+export interface EnvironmentConnection {
+  /** Stable identifier generated when the connection is created. */
+  id: string;
+  /** Display label, e.g. "Prod EU" */
+  label: string;
+  /** Environment host name, e.g. "my-env.sitecorecloud.io" (no protocol). */
+  host: string;
+  /** Automation client credentials created in SitecoreAI Deploy. */
+  clientId: string;
+  clientSecret: string;
+  /**
+   * Set only on the environments synthesized from the app's installation
+   * (Organization mode — never stored): every call goes through the
+   * Marketplace SDK with this sitecoreContextId; host and credentials are
+   * empty.
+   */
+  kind?: "organization";
+  contextId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Saved transfers (stored in the content tree next to the settings)
+// ---------------------------------------------------------------------------
+
+/** What a post-transfer publish covers. */
+export type PublishTarget = "EntireTree" | "TransferredPaths";
+
+/** publishItemMode value of the authoring GraphQL publishItem mutation. */
+export type PublishMode = "SMART" | "FULL";
+
+/**
+ * Post-transfer publish settings. The publish always runs on the destination
+ * environment, always includes subitems, never includes related items, and
+ * always targets the "experienceedge" database.
+ */
+export interface SavedTransferPublish {
+  /** EntireTree publishes /sitecore; TransferredPaths one publish per path. */
+  target: PublishTarget;
+  /** SMART = smart publish, FULL = republish. */
+  mode: PublishMode;
+}
+
+/**
+ * A reusable transfer definition: source/destination connection, the data
+ * trees to move, and optionally a reconciliation run at the end. Persisted as
+ * a JSON list in the SavedTransfers item of the module folder.
+ */
+export interface SavedTransfer {
+  /** Stable identifier generated when the saved transfer is created. */
+  id: string;
+  name: string;
+  /**
+   * Mode the transfer was saved in. Absent on entries saved before modes
+   * existed — those are "cross-org" (stored connections).
+   */
+  mode?: TransferMode;
+  /**
+   * References into the environment list of the transfer's mode: stored
+   * connection ids (cross-org) or tenant ids (organization).
+   */
+  sourceConnectionId: string;
+  destinationConnectionId: string;
+  /** Labels at save time — shown when the referenced connection is gone. */
+  sourceLabel: string;
+  destinationLabel: string;
+  dataTrees: DataTree[];
+  /**
+   * Apply the Content Reconciliation values to the DESTINATION environment
+   * after the transfer finishes (the matching tenant is resolved from the
+   * destination connection at execution time).
+   */
+  reconcile: boolean;
+  /**
+   * Publish the destination environment after the transfer (and the
+   * reconciliation, when enabled) finish. Absent on entries saved before the
+   * option existed — treated as "no publish".
+   */
+  publish?: SavedTransferPublish;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Content Transfer API (source → destination chunk streaming)
+// ---------------------------------------------------------------------------
+
+export type DataTreeScope = "SingleItem" | "ItemAndDescendants";
+
+export type MergeStrategy =
+  | "OverrideExistingItem"
+  | "KeepExistingItem"
+  | "LatestWin"
+  | "OverrideExistingTree";
+
+export interface DataTree {
+  ItemPath: string;
+  Scope: DataTreeScope;
+  MergeStrategy: MergeStrategy;
+}
+
+export interface CreateTransferInput {
+  TransferId: string;
+  Configuration: {
+    Database: string;
+    DataTrees: DataTree[];
+  };
+}
+
+export type ContentTransferState =
+  | "Running"
+  | "Completed"
+  | "Failed"
+  | "NotFound";
+
+export interface ChunkSetMetadata {
+  ChunkSetId: string;
+  ChunkCount: number;
+  TotalItemCount: number;
+}
+
+export interface ContentTransferStatus {
+  State: ContentTransferState;
+  ChunkSetsMetadata: ChunkSetMetadata[];
+}
+
+/** Result of the app's server-side chunk copy (GET source → PUT destination). */
+export interface ChunkCopyResult {
+  chunkId: number;
+  isMedia: boolean;
+  itemsProcessed: number;
+  itemsSkipped: number;
+  /** Bytes forwarded to the destination. */
+  bytes: number;
+}
+
+export interface CompleteChunkSetResult {
+  ContentTransferFileName: string;
+}
+
+// ---------------------------------------------------------------------------
+// Item Transfer API (destination-only: consume .raif sources)
+// ---------------------------------------------------------------------------
+
+export type ItemTransferState =
+  | "Unknown"
+  | "InProgress"
+  | "Finished"
+  | "Failed"
+  | "Queued"
+  | "Discarded";
+
+export type BlobState =
+  | "Unknown"
+  | "Uploading"
+  | "Uploaded"
+  | "Initializing"
+  | "Error"
+  | "Consumed"
+  | "Transferred"
+  | "TransferredWithErrors"
+  | "Queued"
+  | "Discarded";
+
+export interface ItemTransferEntry {
+  Id: string;
+  SourceName: string;
+  DatabaseName: string;
+  ConsumedDate?: string;
+  TransferState: ItemTransferState;
+  Strategy?: MergeStrategy;
+  Description?: string;
+}
+
+export interface ItemTransferDetails extends ItemTransferEntry {
+  TotalItemsCount?: number;
+  TransferredItemsCount?: number;
+  ValidationErrors?: string[] | null;
+  SourcesCount?: number;
+}
+
+export interface ItemTransfersPage {
+  Page: number;
+  PageSize: number;
+  TotalCount: number;
+  Transfers: ItemTransferEntry[];
+}
+
+export interface StartItemTransferResult {
+  /** Value of the upstream `location` header. */
+  location: string | null;
+  /** Final path segment of the location URL (blob/file name = transfer id). */
+  sourceName: string | null;
+}
+
+export interface RetryItemTransferResult {
+  DatabaseName: string;
+  SourceName: string;
+}
+
+export interface TransferredItem {
+  Id: string;
+  Name: string;
+  ParentId?: string;
+  TemplateId?: string;
+  MasterId?: string;
+  IsTransferred: boolean;
+  TimeStamp?: number;
+  TimeStampDate?: string;
+  SourceName?: string;
+}
+
+export interface TransferredItemsPage {
+  Page: number;
+  PageSize: number;
+  TotalCount: number;
+  Items: TransferredItem[];
+}
+
+/** Per-item detail shape is not fully documented; render defensively. */
+export type TransferredItemDetails = Record<string, unknown>;
+
+export interface BlobSource {
+  Name: string;
+  BlobState: BlobState;
+}
+
+export interface BlobSourcesPage {
+  Page: number;
+  PageSize: number;
+  TotalCount: number;
+  Sources: BlobSource[];
+}
+
+export interface BlobSourceState {
+  BlobState: BlobState;
+  Error?: string | null;
+  SourceName: string;
+  /** "consumed.*" name once the import worker picked the source up. */
+  ConsumedName?: string | null;
+}
+
+export interface FileSourcesPage {
+  Page?: number;
+  PageSize?: number;
+  TotalCount?: number;
+  Sources?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface HistoryEvent {
+  Name: ItemTransferState;
+  Date: string;
+}
+
+export interface HistoryEntry {
+  Name: string;
+  SourceName: string;
+  ConsumeDate?: string;
+  Strategy?: MergeStrategy;
+  Events?: HistoryEvent[];
+}
+
+export interface HistoryPage {
+  Page: number;
+  PageSize: number;
+  TotalCount: number;
+  Sources: HistoryEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Content tree browsing (Authoring GraphQL on the source environment)
+// ---------------------------------------------------------------------------
+
+export interface ContentTreeItem {
+  itemId: string;
+  name: string;
+  path: string;
+  hasChildren: boolean;
+}
+
+export interface ItemChildrenResult {
+  item: ContentTreeItem | null;
+  children: ContentTreeItem[];
+}
+
+// ---------------------------------------------------------------------------
+// Typed error shape returned by this app's own API routes
+// ---------------------------------------------------------------------------
+
+export interface TransferApiError {
+  error:
+    | "missing_credentials"
+    | "invalid_credentials"
+    | "validation"
+    | "transfer_api_error"
+    | "upstream_unreachable"
+    | "encryption_error";
+  status?: number;
+  field?: string;
+  detail?: string;
+}
