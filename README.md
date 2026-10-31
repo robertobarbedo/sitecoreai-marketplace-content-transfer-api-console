@@ -241,7 +241,7 @@ at it.
 | `NEXT_PUBLIC_AUTH0_AUDIENCE` | No | Default `https://api-webapp.sitecorecloud.io`. |
 | `NEXT_PUBLIC_AUTH0_SCOPE` | No | Default `openid profile email offline_access`. |
 | `AUTH0_ISSUER` | No | Server-only. Default `https://auth.sitecorecloud.io/`. |
-| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | No | GA4 measurement ID (`G-XXXXXXXXXX`). Leave empty to disable analytics. Inlined at build time. |
+| `CSP_FRAME_ANCESTORS` | No | Server-only. Space-separated CSP sources allowed to embed the app (`Content-Security-Policy: frame-ancestors`). Default `'self' https://*.sitecorecloud.io`. |
 
 See [`.env.example`](.env.example). Rotating `CT_ENCRYPTION_KEY` orphans
 existing ciphertexts — re-enter the client secrets afterwards.
@@ -280,16 +280,18 @@ e.g. with ngrok, and register that URL in a separate development app.
   Organization mode. See
   [`src/lib/marketplace-auth/README.md`](src/lib/marketplace-auth/README.md).
 - **Secrets.** Automation client secrets are encrypted with AES-256-GCM
-  (`enc:v2:<iv>:<tag>:<data>`, key `CT_ENCRYPTION_KEY`) and stored in the
-  content tree. Each is bound to its connection (`host|clientId` is the GCM
-  additional authenticated data), so a ciphertext copied to another
-  connection won't decrypt; changing a connection's host or client ID requires
-  entering the secret again. Encryption happens server-side through the
+  (`enc:v3:<iv>:<tag>:<data>`, key `CT_ENCRYPTION_KEY`) and stored in the
+  content tree. Each is bound to the signed-in organization and its
+  connection (`orgId|host|clientId` is the GCM additional authenticated
+  data), so a ciphertext copied to another organization or connection won't
+  decrypt; changing a connection's host or client ID requires entering the
+  secret again. Encryption happens server-side through the
   encrypt-only `POST /api/crypto/encrypt`; there is no decrypt endpoint.
   Ciphertext is decrypted only inside the proxy right before the token
   exchange, so read access to the content tree never yields plaintext.
-  Plaintext and the older unbound `enc:v1:` values are re-encrypted and
-  re-saved when the app loads; the proxy accepts only `enc:v2:`.
+  Plaintext values are encrypted and re-saved when the app loads; the proxy
+  accepts only `enc:v3:`, and older `enc:v1:`/`enc:v2:` values must be
+  re-entered.
 - **Host restrictions.** Hosts must be lowercase `*.sitecorecloud.io` names
   and upstream redirects are refused, so the automation token is never sent
   anywhere else.
@@ -297,9 +299,23 @@ e.g. with ngrok, and register that URL in a separate development app.
   SitecoreAI through the SDK. In Cross-Organization mode, requests (including
   the encrypted secret and, for chunk copies, the content bytes) pass through
   the app's own server to `auth.sitecorecloud.io` and the environments.
-  Backups are written only to the user's own device.
-- **Analytics.** If `NEXT_PUBLIC_GA_MEASUREMENT_ID` is set, Google Analytics
-  records page views tagged with the app name; no content data is sent.
+  Backups are written only to the user's own device. Chunks relayed in
+  Cross-Organization mode are held in server memory for one request and
+  never persisted.
+- **No analytics or third-party fonts.** The app uses no analytics or
+  tracking; fonts are self-hosted with the app.
+- **Security headers.** Responses send HSTS, a `frame-ancestors` Content
+  Security Policy (`CSP_FRAME_ANCESTORS`), `X-Content-Type-Options`,
+  `Referrer-Policy` and `Permissions-Policy`; `/api` responses are
+  `Cache-Control: no-store`.
+- **Audit log.** Sign-in decisions and sensitive operations (secret
+  encryption, connection tests, transfer create/delete, chunk copy, chunk set
+  completion, consumption start/retry, blob discard) are written as JSON
+  audit lines with UTC timestamps to the server log: event, outcome,
+  organization, environment host and HTTP status. They never contain tokens,
+  secrets or content.
+- [Privacy policy](PRIVACY.md) · [Terms of service](TERMS.md) ·
+  [Data usage disclosure](DATA-USAGE.md) · [Security policy](SECURITY.md)
 
 ## Limitations
 
@@ -318,8 +334,8 @@ e.g. with ngrok, and register that URL in a separate development app.
 ## Development
 
 - Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS v4, Radix UI,
-  `class-variance-authority`, `@sitecore-marketplace-sdk/client` 0.3 and
-  `@sitecore-marketplace-sdk/xmc` 0.4.2, `@auth0/auth0-react` + `jose`,
+  `class-variance-authority`, `@sitecore-marketplace-sdk/client` 0.4 and
+  `@sitecore-marketplace-sdk/xmc` 0.4, `@auth0/auth0-react` + `jose`,
   `@zip.js/zip.js`. Based on the
   [Sitecore Marketplace starter kit](https://github.com/Sitecore/marketplace-starter).
 - `npm run dev` serves on port 5003.
@@ -334,8 +350,12 @@ e.g. with ngrok, and register that URL in a separate development app.
 
 ## Support
 
-Report bugs and request features by opening an issue in this repository.
-This is a community app and is not an official Sitecore product.
+Report bugs and request features in
+[GitHub Issues](https://github.com/robertobarbedo/sitecoreai-marketplace-content-transfer-api-console/issues).
+Report vulnerabilities privately as described in the
+[Security policy](SECURITY.md). Data requests: see the
+[Privacy policy](PRIVACY.md). This is a community app and is not an official
+Sitecore product.
 
 ## License
 

@@ -12,6 +12,7 @@
 
 import { createRemoteJWKSet, errors, jwtVerify, type JWTPayload } from "jose";
 import { NextResponse } from "next/server";
+import { auditLog } from "./audit-log";
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_ISSUER } from "./config";
 
 export interface SitecoreUser {
@@ -24,13 +25,13 @@ export interface SitecoreUser {
 
 export type AuthResult =
   | { ok: true; user: SitecoreUser }
-  | { ok: false; response: NextResponse };
+  | { ok: false; response: NextResponse; reason: string };
 
 // Cached per server instance; jose refreshes keys when it sees an unknown kid
 const jwks = createRemoteJWKSet(new URL(".well-known/jwks.json", AUTH0_ISSUER));
 
 function deny(status: number, error: string): AuthResult {
-  return { ok: false, response: NextResponse.json({ error }, { status }) };
+  return { ok: false, response: NextResponse.json({ error }, { status }), reason: error };
 }
 
 /** Says which check failed; claim values are not secret, so they're included. */
@@ -46,9 +47,33 @@ function describeVerifyError(err: unknown): string {
   return "Could not verify access token";
 }
 
+/** Verifies the caller and writes the decision to the audit log. */
 export async function requireSitecoreUser(
   request: Request,
-  { clientId = AUTH0_CLIENT_ID }: { clientId?: string } = {},
+  options: { clientId?: string } = {},
+): Promise<AuthResult> {
+  const result = await verifySitecoreUser(request, options);
+  if (result.ok) {
+    auditLog(request, {
+      event: "auth",
+      outcome: "allow",
+      sub: result.user.sub,
+      org: result.user.organizationId,
+    });
+  } else {
+    auditLog(request, {
+      event: "auth",
+      outcome: "deny",
+      status: result.response.status,
+      reason: result.reason,
+    });
+  }
+  return result;
+}
+
+async function verifySitecoreUser(
+  request: Request,
+  { clientId = AUTH0_CLIENT_ID }: { clientId?: string },
 ): Promise<AuthResult> {
   if (!clientId) {
     // Fail closed: without the client ID we can't tell our tokens from other apps'

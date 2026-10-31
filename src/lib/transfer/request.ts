@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auditLog } from "@/src/lib/marketplace-auth/audit-log";
 import type { TransferApiError } from "@/src/types/transfer";
 import {
   InvalidCredentialsError,
@@ -137,27 +138,98 @@ export function transferErrorResponse(error: unknown): NextResponse {
   });
 }
 
+/** The typed error name (and upstream status, when known) of a failure. */
+function describeFailure(error: unknown): {
+  reason: TransferApiError["error"] | "unexpected_error";
+  upstreamStatus?: number;
+} {
+  if (error instanceof InvalidCredentialsError) {
+    return { reason: "invalid_credentials" };
+  }
+  if (error instanceof UpstreamUnreachableError) {
+    return { reason: "upstream_unreachable" };
+  }
+  if (error instanceof SecretDecryptionError) {
+    return { reason: "encryption_error" };
+  }
+  if (error instanceof TransferApiRequestError) {
+    return { reason: "transfer_api_error", upstreamStatus: error.status };
+  }
+  return { reason: "unexpected_error" };
+}
+
+/**
+ * Writes an audit line for a sensitive call made with a stored
+ * Cross-Organization secret (token exchange + environment API). Logs the
+ * event, outcome, upstream status, target host and the caller's verified
+ * organization only — never secrets, tokens, payloads or content. Pass the
+ * upstream response status (`ok` overrides the default "status < 400"
+ * outcome), or the thrown error on failure.
+ */
+export function auditUpstream(
+  request: Request,
+  event: string,
+  host: string,
+  result: { upstreamStatus: number; ok?: boolean } | { error: unknown },
+  extra: Record<string, string | number | boolean> = {},
+): void {
+  const org = readOrganizationId(request);
+  if ("error" in result) {
+    const { reason, upstreamStatus } = describeFailure(result.error);
+    auditLog(request, {
+      event,
+      outcome: reason === "invalid_credentials" ? "deny" : "error",
+      org,
+      host,
+      upstreamStatus,
+      reason,
+      ...extra,
+    });
+    return;
+  }
+  auditLog(request, {
+    event,
+    outcome: (result.ok ?? result.upstreamStatus < 400) ? "allow" : "error",
+    org,
+    host,
+    upstreamStatus: result.upstreamStatus,
+    ...extra,
+  });
+}
+
 /**
  * Shared shape of most routes: read the environment headers, proxy a JSON
  * request to the environment API, and map errors to the typed JSON shape.
+ * Pass `auditEvent` for state-changing calls to audit-log them.
  */
 export async function proxyJsonRequest(
   request: Request,
   path: string,
   init: RequestInit = {},
+  auditEvent?: string,
 ): Promise<NextResponse> {
   const env = readEnvironment(request);
   if (!env) {
     return missingCredentialsResponse();
   }
 
+  let response: Response | undefined;
   try {
-    const response = await transferFetch(env, path, init);
+    response = await transferFetch(env, path, init);
+    if (auditEvent) {
+      auditUpstream(request, auditEvent, env.host, {
+        upstreamStatus: response.status,
+      });
+    }
     const data = await readTransferResponse<unknown>(response);
     return NextResponse.json(data ?? null, {
       status: response.status === 204 ? 200 : response.status,
     });
   } catch (error) {
+    // A failure after the upstream answered was already logged with its status.
+    if (auditEvent && !response) {
+      auditUpstream(request, auditEvent, env.host, { error });
+    }
     return transferErrorResponse(error);
   }
 }

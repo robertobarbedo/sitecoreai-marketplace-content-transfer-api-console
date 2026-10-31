@@ -16,5 +16,6 @@ export async function POST(
     request,
     `${CONTENT_TRANSFER_BASE}/transfers/${encodeURIComponent(transferId)}/chunksets/${encodeURIComponent(chunksetId)}/complete`,
     { method: "POST" },
+    "transfer.chunkset.complete",
   );
 }

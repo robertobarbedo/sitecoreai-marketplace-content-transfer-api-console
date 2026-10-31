@@ -17,5 +17,6 @@ export async function PUT(
     request,
     `${ITEM_TRANSFER_BASE}/transfers/databases/${encodeURIComponent(databaseName)}/sources/${encodeURIComponent(sourceName)}`,
     { method: "PUT" },
+    "transfer.consume.retry",
   );
 }

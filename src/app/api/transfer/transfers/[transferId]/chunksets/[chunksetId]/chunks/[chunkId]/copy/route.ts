@@ -5,6 +5,7 @@ import {
   transferFetch,
 } from "@/src/lib/transfer/client";
 import {
+  auditUpstream,
   readSourceEnvironment,
   readDestinationEnvironment,
   missingCredentialsResponse,
@@ -68,12 +69,17 @@ export async function POST(
 
   const chunkPath = `${CONTENT_TRANSFER_BASE}/transfers/${encodeURIComponent(transferId)}/chunksets/${encodeURIComponent(chunksetId)}/chunks/${chunkIdNumber}`;
 
+  // Audited as one event against the destination (where content is written);
+  // the source host and status are recorded alongside.
+  let sourceStatus: number | undefined;
+  let putStatus: number | undefined;
   try {
     // 1. Retrieve the chunk from the source environment.
     const getResponse = await transferFetch(source, chunkPath, {
       method: "GET",
       headers: { Accept: "application/octet-stream" },
     });
+    sourceStatus = getResponse.status;
     if (!getResponse.ok) {
       const detail = await getResponse.text().catch(() => "");
       throw new TransferApiRequestError(getResponse.status, detail);
@@ -103,6 +109,7 @@ export async function POST(
         body: payload,
       },
     );
+    putStatus = putResponse.status;
     if (!putResponse.ok) {
       const detail = await putResponse.text().catch(() => "");
       throw new TransferApiRequestError(putResponse.status, detail);
@@ -115,8 +122,25 @@ export async function POST(
       itemsSkipped: Number.isNaN(itemsSkipped) ? 0 : itemsSkipped,
       bytes: payload.byteLength,
     };
+    auditUpstream(
+      request,
+      "transfer.chunk.copy",
+      destination.host,
+      { upstreamStatus: putStatus },
+      { sourceHost: source.host, sourceStatus },
+    );
     return NextResponse.json(result);
   } catch (error) {
+    auditUpstream(
+      request,
+      "transfer.chunk.copy",
+      destination.host,
+      { error },
+      {
+        sourceHost: source.host,
+        ...(sourceStatus !== undefined ? { sourceStatus } : {}),
+      },
+    );
     return transferErrorResponse(error);
   }
 }

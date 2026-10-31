@@ -64,8 +64,10 @@ attempt runtime testing.** Verification is limited to:
     always send `isMedia` (omitting it ⇒ 405), `consumeFile` takes
     `blob://<name>` + `databaseName` while `getBlobState` takes the RAW name,
     and the bridge ignores per-call `timeoutMs` beyond its own ceiling (init
-    timeout is 10 min; chunk ops retry). SDK pins: client ^0.3.5 + xmc
-    **0.4.2 exactly** (xmc 0.4.3 needs client 0.4).
+    timeout is 10 min; chunk ops retry). SDK: client ^0.4.1 + xmc ^0.4.4
+    (xmc 0.4.3+ needs client 0.4; 0.4.4 swapped the bundled HTTP client
+    but kept the contentTransfer call shapes — re-QA chunk get/save after
+    SDK bumps).
   - SDK `getChunk` hides the `IsMedia` header ⇒ Organization mode derives it
     from paths (`isMediaPath`): `useAutoMigration` splits media / non-media
     trees into separate sub-transfers (`state.transferIds`), the Advanced
@@ -151,6 +153,23 @@ attempt runtime testing.** Verification is limited to:
   shared kit (master in content-publish-inspector) — keep it byte-identical.
   The page is wrapped in a non-blocking `MarketplaceAuthProvider`
   (`AuthBoundary` in page.tsx) so Organization mode never waits for sign-in.
+- **Audit log**: the kit audit-logs every auth decision; the routes add
+  `auditLog` lines for sensitive operations — `secret.encrypt` (encrypt
+  route) and, via `auditUpstream` / the `auditEvent` arg of
+  `proxyJsonRequest` (src/lib/transfer/request.ts), `connection.validate`,
+  `transfer.create`, `transfer.delete`, `transfer.chunk.copy`,
+  `transfer.chunkset.complete`, `transfer.consume.start`,
+  `transfer.consume.retry`, `transfer.blob.delete`. Fields: event, outcome,
+  org, host (and sourceHost for copies), upstream status, reason. Never log
+  secrets, tokens, payloads or content. Read-only GETs are not audited
+  beyond the middleware's auth line.
+- **Fonts**: Inter + JetBrains Mono via `next/font/google` (self-hosted at
+  build time; CSS vars `--font-inter` / `--font-jetbrains-mono` on `<html>`,
+  used by `--font-family-sans/mono` in globals.css). No Google Fonts
+  `<link>`, no analytics.
+- Public docs: README, PRIVACY.md, DATA-USAGE.md (Sitecore data usage
+  disclosure), TERMS.md, SECURITY.md — keep them in sync with what the code
+  sends/stores. `rb205@proton.me` is an intentional placeholder.
 - **Hosts**: `isValidHost` (client.ts) accepts only lowercase
   `*.sitecorecloud.io` names; headers are lowercased before the check, and
   `transferFetch` uses `redirect: "error"` so the token can't follow a

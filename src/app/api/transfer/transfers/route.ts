@@ -45,8 +45,10 @@ export async function POST(request: Request) {
     }
   }
 
-  return proxyJsonRequest(request, `${CONTENT_TRANSFER_BASE}/transfers`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return proxyJsonRequest(
+    request,
+    `${CONTENT_TRANSFER_BASE}/transfers`,
+    { method: "POST", body: JSON.stringify(input) },
+    "transfer.create",
+  );
 }

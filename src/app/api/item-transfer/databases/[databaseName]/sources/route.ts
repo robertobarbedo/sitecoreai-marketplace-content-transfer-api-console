@@ -5,6 +5,7 @@ import {
   transferFetch,
 } from "@/src/lib/transfer/client";
 import {
+  auditUpstream,
   readEnvironment,
   missingCredentialsResponse,
   jsonError,
@@ -42,12 +43,16 @@ export async function POST(
   if (blobName) query.set("blobName", blobName);
   if (fileName) query.set("fileName", fileName);
 
+  let response: Response | undefined;
   try {
-    const response = await transferFetch(
+    response = await transferFetch(
       env,
       `${ITEM_TRANSFER_BASE}/transfers/databases/${encodeURIComponent(databaseName)}/sources?${query.toString()}`,
       { method: "POST" },
     );
+    auditUpstream(request, "transfer.consume.start", env.host, {
+      upstreamStatus: response.status,
+    });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new TransferApiRequestError(response.status, detail);
@@ -64,6 +69,9 @@ export async function POST(
     };
     return NextResponse.json(result, { status: 202 });
   } catch (error) {
+    if (!response) {
+      auditUpstream(request, "transfer.consume.start", env.host, { error });
+    }
     return transferErrorResponse(error);
   }
 }

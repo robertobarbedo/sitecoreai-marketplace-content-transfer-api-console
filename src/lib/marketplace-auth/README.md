@@ -11,7 +11,8 @@ The folder has no project-specific imports. To add it to another Marketplace app
 | `config.ts` | both | Auth0 domain, audience, scope, client ID, issuer (from env) |
 | `AuthProvider.tsx` | client | `<MarketplaceAuthProvider appContext={...}>` signs the user in. By default children render only once a token is available; with `blocking={false}` they render immediately and only `authedFetch` waits |
 | `authedFetch.ts` | client | `authedFetch(url, init)` is `fetch` with `Authorization: Bearer <token>`; waits for sign-in, rejects if it fails |
-| `server.ts` | server | `requireSitecoreUser(request)` verifies the token (signature, issuer, audience, expiry, `azp` = this app's client ID) |
+| `server.ts` | server | `requireSitecoreUser(request)` verifies the token (signature, issuer, audience, expiry, `azp` = this app's client ID), and writes the allow or deny decision to the audit log |
+| `audit-log.ts` | server | `auditLog(request, event)` writes one JSON line (UTC timestamp, method, path, event, outcome, `sub`, `org`) to stdout for the log drain. Never log tokens, secrets or content |
 
 ## Adding it to an app
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auditLog } from "@/src/lib/marketplace-auth/audit-log";
 import { isValidHost } from "@/src/lib/transfer/client";
 import {
   SecretDecryptionError,
@@ -65,11 +66,30 @@ export async function POST(request: Request) {
     });
   }
 
+  // Audit lines carry the event, outcome, host and organization only —
+  // never the secret, the ciphertext or the client ID.
   try {
-    return NextResponse.json({
-      value: sealForConnection(secret, { organizationId, host, clientId }),
+    const value = sealForConnection(secret, { organizationId, host, clientId });
+    auditLog(request, {
+      event: "secret.encrypt",
+      outcome: "allow",
+      status: 200,
+      org: organizationId,
+      host,
     });
+    return NextResponse.json({ value });
   } catch (error) {
+    auditLog(request, {
+      event: "secret.encrypt",
+      outcome: "error",
+      status: 500,
+      org: organizationId,
+      host,
+      reason:
+        error instanceof SecretDecryptionError
+          ? "encryption_error"
+          : "unexpected_error",
+    });
     if (error instanceof SecretDecryptionError) {
       return jsonError("encryption_error", 500, { detail: error.message });
     }

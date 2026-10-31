@@ -14,5 +14,6 @@ export async function DELETE(
     request,
     `${CONTENT_TRANSFER_BASE}/transfers/${encodeURIComponent(transferId)}`,
     { method: "DELETE" },
+    "transfer.delete",
   );
 }
