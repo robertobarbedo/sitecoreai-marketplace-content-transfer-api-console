@@ -89,7 +89,7 @@ Off. The app does not use AI or machine learning.
   - `NEXT_PUBLIC_SITECORE_APP_ID` (required)
   - `CT_ENCRYPTION_KEY` (required for Cross-Organization mode; server-only, 32-byte base64, `openssl rand -base64 32`)
   - Optional: `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_AUTH0_SCOPE`, `AUTH0_ISSUER`, `CSP_FRAME_ANCESTORS`
-- App logo: `public/icon.svg`
+- App logo: `public/arrow-square-in-duotone.svg`
 
 ## 11. Submission details (visible only to Sitecore)
 

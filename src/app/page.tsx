@@ -491,7 +491,7 @@ export default function StandaloneExtension() {
               <div className="flex items-center gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src="/icon.svg"
+                  src="/arrow-square-in-duotone.svg"
                   alt="Content Transfer Console"
                   width={40}
                   height={40}

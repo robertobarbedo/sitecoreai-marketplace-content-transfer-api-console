@@ -207,7 +207,7 @@ credentials.
 3. Add the **Standalone** extension point with route `/`.
 4. Under API access, enable **SitecoreAI APIs**.
 5. Set the deployment URL to `https://<your-deployment>/`.
-6. Upload the app logo from [`public/icon.svg`](public/icon.svg).
+6. Upload the app logo from [`public/arrow-square-in-duotone.svg`](public/arrow-square-in-duotone.svg).
 7. Enable custom authorization and create **client credentials** of type
    **Single-page app**. Register the deployment origin (e.g.
    `https://<your-deployment>/`) as the allowed callback URL (with trailing
