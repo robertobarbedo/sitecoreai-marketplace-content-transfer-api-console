@@ -8,12 +8,15 @@ import {
   mdiFileTree,
   mdiStop,
   mdiArrowRightBold,
+  mdiLoading,
+  mdiRestart,
 } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -96,8 +99,16 @@ export function AutoMigrationTab({
   showToast,
   onRunningChange,
 }: AutoMigrationTabProps) {
-  const { state, running, progressByChunkSet, start, cancel, reset } =
-    useAutoMigration(source, destination);
+  const {
+    state,
+    running,
+    progressByChunkSet,
+    start,
+    cancel,
+    confirm,
+    decline,
+    reset,
+  } = useAutoMigration(source, destination);
 
   useEffect(() => {
     onRunningChange?.(running);
@@ -140,6 +151,12 @@ export function AutoMigrationTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.stage]);
 
+  // A run that fails while the confirmation is open closes it so the
+  // failure shows in the progress card.
+  useEffect(() => {
+    if (state.stage === "failed") setConfirmStartOpen(false);
+  }, [state.stage]);
+
   const setRowPath = (id: number, itemPath: string) =>
     setRows((prev) =>
       withTrailingEmpty(
@@ -176,7 +193,12 @@ export function AutoMigrationTab({
   const pathValid = paths.length > 0 && invalidPaths.length === 0;
   const canStart = pathValid && !running;
 
-  const beginMigration = () => {
+  /**
+   * Opens the confirmation and starts preparing behind it: the transfer runs
+   * up to the upload into the destination and installs only once confirmed
+   * (declining discards what was prepared).
+   */
+  const handleStart = () => {
     const dataTrees: DataTree[] = paths.map((ItemPath) => ({
       ItemPath,
       Scope: scope,
@@ -184,157 +206,186 @@ export function AutoMigrationTab({
     }));
     startedPathsRef.current = paths;
     reset();
-    start({ dataTrees });
+    start({ dataTrees, awaitConfirmation: true });
+    setConfirmStartOpen(true);
   };
 
-  const handleStart = () => setConfirmStartOpen(true);
+  const closeConfirmation = (confirmed: boolean) => {
+    setConfirmStartOpen(false);
+    if (confirmed) confirm();
+    else decline();
+  };
+
+  /** Clears the finished run and the form for the next transfer. */
+  const startOver = () => {
+    reset();
+    setRows([newRow()]);
+    setScope("SingleItem");
+    setMergeStrategy("OverrideExistingItem");
+  };
+
+  // The form gives way to the progress once the user confirmed (or a
+  // pre-staged run failed); a declined run that is cleaning up keeps the form.
+  const showProgress =
+    state.stage !== "idle" && (state.confirmed || state.stage === "failed");
+  const finished = state.stage === "done" || state.stage === "failed";
+
+  const preparingLabel = state.prepared
+    ? `Ready — the content is uploaded to ${destination.label} and is installed once you start.`
+    : state.stage === "create"
+      ? "Preparing in the background: creating the transfer…"
+      : state.stage === "snapshot"
+        ? "Preparing in the background: building the snapshot…"
+        : `Preparing in the background: uploading to ${destination.label}…`;
 
   const overrideTree = mergeStrategy === "OverrideExistingTree";
 
   return (
     <div className="flex flex-col gap-4">
-      <Card style="outline" padding="md">
-        <CardHeader>
-          <CardTitle>Automatic content transfer</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Pick one or more content tree paths and how to merge them — the
-            transfer, chunk copying, .raif generation, consumption into the
-            destination database ({/* hidden default */}master), and cleanup all
-            run automatically. Use the Advanced tab for a different scope or
-            merge strategy per path, other databases, or step-by-step control.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-start gap-3">
-            <div className="flex min-w-72 flex-1 flex-col gap-1.5">
-              <label
-                htmlFor={`auto-path-${rows[0].id}`}
-                className="text-sm font-medium"
-              >
-                Content tree paths
-              </label>
-              {rows.map((row, index) => {
-                const trailing = index === rows.length - 1;
-                return (
-                  <div key={row.id} className="flex gap-1.5">
-                    <Input
-                      id={`auto-path-${row.id}`}
-                      value={row.itemPath}
-                      autoComplete="off"
-                      onChange={(e) => setRowPath(row.id, e.target.value)}
-                      onPaste={(e) => {
-                        if (
-                          pasteLines(row.id, e.clipboardData.getData("text"))
-                        ) {
-                          e.preventDefault();
+      {!showProgress && (
+        <Card style="outline" padding="md">
+          <CardHeader>
+            <CardTitle>Automatic content transfer</CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Pick one or more content tree paths and how to merge them — the
+              transfer, chunk copying, .raif generation, consumption into the
+              destination database ({/* hidden default */}master), and cleanup
+              all run automatically. Use the Advanced tab for a different scope
+              or merge strategy per path, other databases, or step-by-step
+              control.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="flex min-w-72 flex-1 flex-col gap-1.5">
+                <label
+                  htmlFor={`auto-path-${rows[0].id}`}
+                  className="text-sm font-medium"
+                >
+                  Content tree paths
+                </label>
+                {rows.map((row, index) => {
+                  const trailing = index === rows.length - 1;
+                  return (
+                    <div key={row.id} className="flex gap-1.5">
+                      <Input
+                        id={`auto-path-${row.id}`}
+                        value={row.itemPath}
+                        autoComplete="off"
+                        onChange={(e) => setRowPath(row.id, e.target.value)}
+                        onPaste={(e) => {
+                          if (
+                            pasteLines(row.id, e.clipboardData.getData("text"))
+                          ) {
+                            e.preventDefault();
+                          }
+                        }}
+                        placeholder={
+                          index === 0
+                            ? "/sitecore/content/Home/MyItem"
+                            : "Add another path (optional)"
                         }
-                      }}
-                      placeholder={
-                        index === 0
-                          ? "/sitecore/content/Home/MyItem"
-                          : "Add another path (optional)"
-                      }
-                      aria-label={`Content tree path ${index + 1}`}
-                      className="flex-1 font-mono text-xs"
-                      disabled={running}
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setPickerRowId(row.id)}
-                      disabled={running}
-                      aria-label="Browse the source content tree"
-                      title="Browse the source content tree"
-                    >
-                      <Icon path={mdiFileTree} />
-                    </Button>
-                    {/* The trailing empty line is where the next path goes —
+                        aria-label={`Content tree path ${index + 1}`}
+                        className="flex-1 font-mono text-xs"
+                        disabled={running}
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setPickerRowId(row.id)}
+                        disabled={running}
+                        aria-label="Browse the source content tree"
+                        title="Browse the source content tree"
+                      >
+                        <Icon path={mdiFileTree} />
+                      </Button>
+                      {/* The trailing empty line is where the next path goes —
                         it keeps the slot so the lines stay aligned. */}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeRow(row.id)}
-                      disabled={running || trailing}
-                      className={trailing ? "invisible" : undefined}
-                      aria-label="Remove this path"
-                      title="Remove this path"
-                    >
-                      <Icon path={mdiClose} />
-                    </Button>
-                  </div>
-                );
-              })}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeRow(row.id)}
+                        disabled={running || trailing}
+                        className={trailing ? "invisible" : undefined}
+                        aria-label="Remove this path"
+                        title="Remove this path"
+                      >
+                        <Icon path={mdiClose} />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">Scope</label>
+                <Select
+                  value={scope}
+                  onValueChange={(value) => setScope(value as DataTreeScope)}
+                  disabled={running}
+                >
+                  <SelectTrigger className="w-52" aria-label="Scope">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SCOPES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">Merge strategy</label>
+                <Select
+                  value={mergeStrategy}
+                  onValueChange={(value) =>
+                    setMergeStrategy(value as MergeStrategy)
+                  }
+                  disabled={running}
+                >
+                  <SelectTrigger className="w-72" aria-label="Merge strategy">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MERGE_STRATEGIES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium">Scope</label>
-              <Select
-                value={scope}
-                onValueChange={(value) => setScope(value as DataTreeScope)}
-                disabled={running}
-              >
-                <SelectTrigger className="w-52" aria-label="Scope">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SCOPES.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium">Merge strategy</label>
-              <Select
-                value={mergeStrategy}
-                onValueChange={(value) =>
-                  setMergeStrategy(value as MergeStrategy)
-                }
-                disabled={running}
-              >
-                <SelectTrigger className="w-72" aria-label="Merge strategy">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MERGE_STRATEGIES.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
-          {mergeStrategy === "OverrideExistingTree" && (
-            <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
-              &quot;Override existing tree&quot; replaces the whole matching
-              tree in the destination environment.
-            </p>
-          )}
+            {mergeStrategy === "OverrideExistingTree" && (
+              <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
+                &quot;Override existing tree&quot; replaces the whole matching
+                tree in the destination environment.
+              </p>
+            )}
 
-          <div className="flex flex-col items-center gap-2">
-            {running ? (
-              <Button variant="outline" colorScheme="danger" onClick={cancel}>
-                <Icon path={mdiStop} />
-                Cancel transfer
-              </Button>
-            ) : (
+            <div className="flex flex-col items-center gap-2">
               <Button onClick={handleStart} disabled={!canStart}>
                 Start transfer
               </Button>
-            )}
-            {invalidPaths.length > 0 && (
-              <p className="text-xs text-danger-fg">
-                Every path must start with /sitecore.
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              {running && !confirmStartOpen && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Icon path={mdiLoading} size={0.6} className="animate-spin" />
+                  Discarding the prepared transfer…
+                </p>
+              )}
+              {invalidPaths.length > 0 && (
+                <p className="text-xs text-danger-fg">
+                  Every path must start with /sitecore.
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-      {state.stage !== "idle" && (
+      {showProgress && (
         <Card style="outline" padding="md">
           <CardHeader>
             <CardTitle>Progress</CardTitle>
@@ -342,6 +393,19 @@ export function AutoMigrationTab({
               <CardDescription className="font-mono text-xs">
                 Transfer {state.transferIds.join(" · ")}
               </CardDescription>
+            )}
+            {running && (
+              <CardAction>
+                <Button
+                  variant="outline"
+                  colorScheme="danger"
+                  size="sm"
+                  onClick={cancel}
+                >
+                  <Icon path={mdiStop} />
+                  Cancel transfer
+                </Button>
+              </CardAction>
             )}
           </CardHeader>
           <CardContent>
@@ -362,16 +426,25 @@ export function AutoMigrationTab({
                 </p>
                 {state.error && <p className="mt-1">{state.error}</p>}
                 <p className="mt-1">
-                  The transfer ID was saved to your recent transfers — you can
-                  continue or clean it up from the Advanced tab.
+                  {state.discarded
+                    ? "Nothing was installed — the prepared transfer was discarded."
+                    : "The transfer ID was saved to your recent transfers — you can continue or clean it up from the Advanced tab."}
                 </p>
+              </div>
+            )}
+            {finished && (
+              <div className="mt-4 flex justify-center">
+                <Button onClick={startOver}>
+                  <Icon path={mdiRestart} />
+                  New Quick Transfer
+                </Button>
               </div>
             )}
           </CardContent>
         </Card>
       )}
 
-      {state.stage !== "idle" && (
+      {showProgress && (
         <TransferStageDetailsCard
           state={state}
           progressByChunkSet={progressByChunkSet}
@@ -392,7 +465,12 @@ export function AutoMigrationTab({
         }}
       />
 
-      <Dialog open={confirmStartOpen} onOpenChange={setConfirmStartOpen}>
+      <Dialog
+        open={confirmStartOpen}
+        onOpenChange={(open) => {
+          if (!open) closeConfirmation(false);
+        }}
+      >
         <DialogContent className={overrideTree ? "border-danger" : undefined}>
           <DialogHeader>
             <DialogTitle
@@ -454,19 +532,22 @@ export function AutoMigrationTab({
             </p>
           )}
 
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Icon
+              path={state.prepared ? mdiCheckCircle : mdiLoading}
+              size={0.6}
+              className={state.prepared ? "text-success-fg" : "animate-spin"}
+            />
+            {preparingLabel}
+          </p>
+
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmStartOpen(false)}
-            >
+            <Button variant="outline" onClick={() => closeConfirmation(false)}>
               Cancel
             </Button>
             <Button
               colorScheme={overrideTree ? "danger" : undefined}
-              onClick={() => {
-                setConfirmStartOpen(false);
-                beginMigration();
-              }}
+              onClick={() => closeConfirmation(true)}
             >
               Start transfer
             </Button>

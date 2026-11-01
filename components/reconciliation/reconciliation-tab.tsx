@@ -145,6 +145,11 @@ export function ReconciliationTab({ client }: ReconciliationTabProps) {
         <div className="max-w-[560px]">
           <p className="font-bold">Content Reconciliation is not ready</p>
           <p className="mt-1 text-sm text-text-subtle">{gateMessage}</p>
+          <p className="mt-3 rounded-lg bg-[#f5f5f5] px-3 py-2 text-sm">
+            This tab needs the <strong>Reconciliation</strong> app. Install it
+            from the SitecoreAI Marketplace, set up your base and secondary
+            environments there, then come back and check again.
+          </p>
         </div>
         <Button variant="outline" size="sm" onClick={runCheck}>
           <Icon path={mdiRefresh} />

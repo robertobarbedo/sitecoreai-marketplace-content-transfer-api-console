@@ -61,6 +61,12 @@ export const AUTO_MIGRATION_STAGES: Exclude<
 export interface AutoMigrationInput {
   /** One or more content trees to move in a single transfer operation. */
   dataTrees: DataTree[];
+  /**
+   * Pre-stage while the user confirms: run up to the upload into the
+   * destination and wait for `confirm()` before installing (consuming).
+   * `decline()` discards everything prepared so far and returns to idle.
+   */
+  awaitConfirmation?: boolean;
 }
 
 export interface ConsumptionProgress {
@@ -77,6 +83,18 @@ export interface AutoMigrationState {
   rawError?: unknown;
   cancelled?: boolean;
   /**
+   * False while a pre-staged run waits for the user's go-ahead (see
+   * `AutoMigrationInput.awaitConfirmation`); true otherwise.
+   */
+  confirmed: boolean;
+  /** A pre-staged run reached the gate: nothing left to do but install. */
+  prepared?: boolean;
+  /**
+   * The run failed before the go-ahead and what it prepared was discarded
+   * (nothing to continue in the Advanced tab).
+   */
+  discarded?: boolean;
+  /**
    * Transfer operation id(s). Cross-org runs one transfer; Organization mode
    * runs one per media/content group.
    */
@@ -90,6 +108,7 @@ export interface AutoMigrationState {
 
 const IDLE_STATE: AutoMigrationState = {
   stage: "idle",
+  confirmed: true,
   transferIds: [],
   chunkSets: [],
   raifFiles: {},
@@ -129,6 +148,10 @@ export function useAutoMigration(
 
   const cancelledRef = useRef(false);
   const copyingChunkSetRef = useRef<string | null>(null);
+  // Pre-staging gate: confirmedRef may flip before the pipeline reaches the
+  // gate; releaseGateRef wakes a pipeline already waiting there.
+  const confirmedRef = useRef(true);
+  const releaseGateRef = useRef<(() => void) | null>(null);
 
   // Stop the pipeline if the hook's owner unmounts mid-run.
   useEffect(() => {
@@ -149,13 +172,17 @@ export function useAutoMigration(
   }, []);
 
   const running =
-    state.stage !== "idle" && state.stage !== "done" && state.stage !== "failed";
+    state.stage !== "idle" &&
+    state.stage !== "done" &&
+    state.stage !== "failed";
 
   const start = useCallback(
     async (input: AutoMigrationInput) => {
       if (running) return;
 
       cancelledRef.current = false;
+      confirmedRef.current = !input.awaitConfirmation;
+      releaseGateRef.current = null;
       resetProgress();
       const organization = isOrganizationEnvironment(source);
       const mode = modeOf(source);
@@ -170,8 +197,14 @@ export function useAutoMigration(
       const groups: { dataTrees: DataTree[]; isMedia?: boolean }[] =
         organization
           ? [
-              { dataTrees: trees.filter((t) => isMediaPath(t.ItemPath)), isMedia: true },
-              { dataTrees: trees.filter((t) => !isMediaPath(t.ItemPath)), isMedia: false },
+              {
+                dataTrees: trees.filter((t) => isMediaPath(t.ItemPath)),
+                isMedia: true,
+              },
+              {
+                dataTrees: trees.filter((t) => !isMediaPath(t.ItemPath)),
+                isMedia: false,
+              },
             ].filter((group) => group.dataTrees.length > 0)
           : [{ dataTrees: trees }];
       const subTransfers = groups.map((group) => ({
@@ -190,7 +223,9 @@ export function useAutoMigration(
             try {
               const blob = await getBlobSourceState(destination, name);
               if (blob?.BlobState === "Error") {
-                throw new Error(blob.Error || `Blob ${name} reported an error.`);
+                throw new Error(
+                  blob.Error || `Blob ${name} reported an error.`,
+                );
               }
               if (blob?.BlobState === "Uploaded") break;
             } catch (error) {
@@ -302,7 +337,9 @@ export function useAutoMigration(
             }
             if (progress.state === "Finished") finished.add(name);
             if (progress.state === "Failed") {
-              failures.push(`${name}${progress.detail ? ` (${progress.detail})` : ""}`);
+              failures.push(
+                `${name}${progress.detail ? ` (${progress.detail})` : ""}`,
+              );
             }
             const { state: progressState, detail } = progress;
             setState((prev) => ({
@@ -321,11 +358,31 @@ export function useAutoMigration(
         }
       };
 
+      /**
+       * Pre-staging gate: waits for confirm() (returns) or decline()
+       * (throws CancelledError).
+       */
+      const waitForConfirmation = async () => {
+        if (!confirmedRef.current && !cancelledRef.current) {
+          patch({ prepared: true });
+          await new Promise<void>((resolve) => {
+            releaseGateRef.current = resolve;
+          });
+          releaseGateRef.current = null;
+        }
+        ensureNotCancelled();
+      };
+
       setState({
         ...IDLE_STATE,
         stage: "create",
+        confirmed: confirmedRef.current,
         transferIds,
       });
+
+      // Created on the destination before the gate (Cross-Organization
+      // completes the sets up front — the blobs can be discarded on decline).
+      const preparedRaifs: string[] = [];
 
       try {
         // 1. Create the transfer operation(s) on the source.
@@ -405,6 +462,10 @@ export function useAutoMigration(
           }
         }
 
+        // Organization mode stops before completing: the SDK cannot discard
+        // an assembled .raif, so a declined run must not leave one behind.
+        if (organization) await waitForConfirmation();
+
         // 4. Complete each chunk set into a .raif file.
         patch({ stage: "complete" });
         const raifFiles: Record<string, string> = {};
@@ -423,9 +484,14 @@ export function useAutoMigration(
             );
           }
           raifFiles[chunkSet.ChunkSetId] = fileName;
+          preparedRaifs.push(fileName);
           recordRaifFile(sub.transferId, chunkSet.ChunkSetId, fileName);
           patch({ raifFiles: { ...raifFiles } });
         }
+
+        // Cross-Organization stops after completing (the blobs are uploaded
+        // and can still be discarded on decline).
+        if (!organization) await waitForConfirmation();
 
         // 5. Consume each .raif into the destination database.
         const sourceNames = Object.values(raifFiles);
@@ -467,6 +533,31 @@ export function useAutoMigration(
         copyingChunkSetRef.current = null;
         const cancelled =
           error instanceof CancelledError || cancelledRef.current;
+
+        // Declined (or failed) before the go-ahead: the user never asked for
+        // this transfer, so discard what was prepared and return to idle.
+        const discarded = !confirmedRef.current;
+        if (discarded) {
+          if (cancelled) setState((prev) => ({ ...prev, stage: "cleanup" }));
+          for (const name of preparedRaifs) {
+            await callTransferApi<void>(
+              destination,
+              `/api/item-transfer/sources/blobs/${encodeURIComponent(name)}`,
+              { method: "DELETE" },
+            ).catch(() => {});
+          }
+          for (const transferId of transferIds) {
+            await deleteTransfer(source, transferId).catch(() => {});
+            // Best effort: drops chunks already staged on the destination.
+            await deleteTransfer(destination, transferId).catch(() => {});
+            removeRecentTransfer(transferId);
+          }
+          if (cancelled) {
+            setState(IDLE_STATE);
+            return;
+          }
+        }
+
         setState((prev) => ({
           ...prev,
           stage: "failed",
@@ -478,6 +569,7 @@ export function useAutoMigration(
               ? error.message
               : "The migration failed.",
           rawError: cancelled ? undefined : error,
+          discarded,
         }));
       }
     },
@@ -497,7 +589,21 @@ export function useAutoMigration(
     if (copyingChunkSetRef.current) {
       cancelChunkSet(copyingChunkSetRef.current);
     }
+    releaseGateRef.current?.();
   }, [cancelChunkSet]);
+
+  /** Go-ahead for a pre-staged run: install once the upload is done. */
+  const confirm = useCallback(() => {
+    confirmedRef.current = true;
+    patch({ confirmed: true });
+    releaseGateRef.current?.();
+  }, [patch]);
+
+  /** Decline a pre-staged run: stop it and discard what was prepared. */
+  const decline = useCallback(() => {
+    if (confirmedRef.current) return;
+    cancel();
+  }, [cancel]);
 
   const reset = useCallback(() => {
     if (running) return;
@@ -505,5 +611,14 @@ export function useAutoMigration(
     setState(IDLE_STATE);
   }, [running, resetProgress]);
 
-  return { state, running, progressByChunkSet, start, cancel, reset };
+  return {
+    state,
+    running,
+    progressByChunkSet,
+    start,
+    cancel,
+    confirm,
+    decline,
+    reset,
+  };
 }
