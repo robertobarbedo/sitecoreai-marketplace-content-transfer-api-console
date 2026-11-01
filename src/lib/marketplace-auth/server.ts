@@ -30,6 +30,14 @@ export type AuthResult =
 // Cached per server instance; jose refreshes keys when it sees an unknown kid
 const jwks = createRemoteJWKSet(new URL(".well-known/jwks.json", AUTH0_ISSUER));
 
+// Sitecore Cloud namespaces its claims; there is no plain `org_id` (live token, 2026-11-01)
+const ORG_ID_CLAIM = "https://auth.sitecorecloud.io/claims/org_id";
+
+function readOrganizationId(payload: JWTPayload): string | null {
+  const value = payload[ORG_ID_CLAIM] ?? payload.org_id;
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
 function deny(status: number, error: string): AuthResult {
   return { ok: false, response: NextResponse.json({ error }, { status }), reason: error };
 }
@@ -107,7 +115,7 @@ async function verifySitecoreUser(
       ok: true,
       user: {
         sub: payload.sub,
-        organizationId: typeof payload.org_id === "string" ? payload.org_id : null,
+        organizationId: readOrganizationId(payload),
         claims: payload,
       },
     };

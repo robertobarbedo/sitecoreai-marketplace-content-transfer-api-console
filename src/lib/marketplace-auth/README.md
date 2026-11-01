@@ -48,5 +48,11 @@ These come from a community guide plus standard Auth0 behaviour. Decode a real t
 - Issuer is `https://auth.sitecorecloud.io/`, and the JWKS is at `<issuer>.well-known/jwks.json`.
 - The audience is `https://api-webapp.sitecorecloud.io`.
 - The `azp` claim equals this app's client ID.
-- The organization is in the `org_id` claim.
 - `application.context` exposes `organizationId` and `marketplaceAppTenantId`.
+
+Confirmed on a live token (2026-11-01): the issuer, audience and `azp` checks
+pass, and the organization is in the namespaced
+`https://auth.sitecorecloud.io/claims/org_id` claim (there is no plain
+`org_id`; the server falls back to it only in case Sitecore adds it). Tenant
+and other organization details are namespaced the same way
+(`.../claims/tenant_id`, `.../claims/org_name`, ...).

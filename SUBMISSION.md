@@ -1,7 +1,7 @@
 # Marketplace submission: Content Transfer Console
 
 Copy-paste text for Sitecore's public-app submission form, in form order.
-Replace every `{{...}}` placeholder before submitting.
+Replace `{{APP_URL}}` with the production deployment URL before submitting.
 
 ## 1. App name
 
@@ -67,7 +67,7 @@ PNG, shown as 600×900 thumbnails. Capture during live QA.
 
 ## 8. Data usage disclosure
 
-Paste from `DATA-USAGE.md` (replace `rb205@proton.me` in it first).
+Paste from `DATA-USAGE.md`.
 
 Summary: in Organization mode every call runs in the browser through the Marketplace SDK with the user's own session, and nothing reaches the app's server. In Cross-Organization mode the browser calls the app's own signed-in API routes, which exchange a customer-stored automation client (secret sealed with AES-256-GCM, bound to organization, host and client ID) for a token and relay requests and chunk bytes to `*.sitecorecloud.io` hosts without persisting them. Settings and saved transfers live in the customer's own content tree, backups only on the user's device, and audit logs (no content, tokens or secrets) are kept for 90 days.
 
@@ -118,4 +118,4 @@ Next.js lists sharp (LGPL-3.0 libvips) as an optional dependency for image optim
 - [ ] `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_SITECORE_APP_ID` and `CT_ENCRYPTION_KEY` set on the production host; app rebuilt
 - [ ] Production client credentials registered with `{{APP_URL}}` callback, logout, web origin and CORS URLs
 - [ ] Screenshots captured (PNG)
-- [ ] `rb205@proton.me` replaced in DATA-USAGE.md, PRIVACY.md, TERMS.md, SECURITY.md; `Roberto Barbedo`, `rb205@proton.me`, `{{APP_URL}}` replaced in this form
+- [ ] `{{APP_URL}}` replaced with the production deployment URL in this form
