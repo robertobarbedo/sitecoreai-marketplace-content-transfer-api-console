@@ -190,6 +190,13 @@ attempt runtime testing.** Verification is limited to:
   discards the consumed blobs). Its TabsContent is `forceMount`ed in
   `page.tsx` so switching tabs doesn't unmount a running pipeline — keep
   that. Failed runs stay in recent transfers for the Advanced tab to attach.
+  **Pre-staging:** Quick Transfer starts the pipeline as soon as the confirm
+  dialog opens (`start({ awaitConfirmation: true })`) and it waits at a gate
+  until `confirm()`: Organization mode stops BEFORE complete (the SDK can't
+  discard an assembled .raif), Cross-Org stops AFTER complete (blobs are
+  discardable). `decline()` or a pre-confirm failure discards everything
+  (blobs, source + destination transfer, recent entry). Saved Transfers
+  doesn't use the gate.
 - **API quirk (observed in practice):** `GET /transfers/{transferId}` on the
   Item Transfer API can return 404 for a blob-name id even while/after the
   source is consumed. Consumption state must be derived from the

@@ -87,8 +87,6 @@ export interface AutoMigrationState {
    * `AutoMigrationInput.awaitConfirmation`); true otherwise.
    */
   confirmed: boolean;
-  /** A pre-staged run reached the gate: nothing left to do but install. */
-  prepared?: boolean;
   /**
    * The run failed before the go-ahead and what it prepared was discarded
    * (nothing to continue in the Advanced tab).
@@ -364,7 +362,6 @@ export function useAutoMigration(
        */
       const waitForConfirmation = async () => {
         if (!confirmedRef.current && !cancelledRef.current) {
-          patch({ prepared: true });
           await new Promise<void>((resolve) => {
             releaseGateRef.current = resolve;
           });

@@ -230,14 +230,6 @@ export function AutoMigrationTab({
     state.stage !== "idle" && (state.confirmed || state.stage === "failed");
   const finished = state.stage === "done" || state.stage === "failed";
 
-  const preparingLabel = state.prepared
-    ? `Ready — the content is uploaded to ${destination.label} and is installed once you start.`
-    : state.stage === "create"
-      ? "Preparing in the background: creating the transfer…"
-      : state.stage === "snapshot"
-        ? "Preparing in the background: building the snapshot…"
-        : `Preparing in the background: uploading to ${destination.label}…`;
-
   const overrideTree = mergeStrategy === "OverrideExistingTree";
 
   return (
@@ -531,15 +523,6 @@ export function AutoMigrationTab({
               {destination.label}.
             </p>
           )}
-
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Icon
-              path={state.prepared ? mdiCheckCircle : mdiLoading}
-              size={0.6}
-              className={state.prepared ? "text-success-fg" : "animate-spin"}
-            />
-            {preparingLabel}
-          </p>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => closeConfirmation(false)}>
