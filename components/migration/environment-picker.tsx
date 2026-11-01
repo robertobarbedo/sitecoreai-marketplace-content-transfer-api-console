@@ -2,7 +2,6 @@
 
 import { mdiArrowRightBold } from "@mdi/js";
 import { Icon } from "@/lib/icon";
-import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -109,14 +108,14 @@ interface EnvironmentPickerProps {
    * (Backup & Restore: backup reads the source, restore the destination).
    */
   allowSame?: boolean;
-  /** Disables just one side (e.g. Backup uses only the source). */
-  disableSource?: boolean;
-  disableDestination?: boolean;
+  /** Shows just one side (Backup uses only the source, Restore only the destination). */
+  hideSource?: boolean;
+  hideDestination?: boolean;
 }
 
 /**
- * Selects the source / destination environment pair that is the working
- * context of the whole migration workspace.
+ * Selects the source / destination environment pair of the tab it sits in.
+ * The selection itself is shared page state, so it carries across tabs.
  */
 export function EnvironmentPicker({
   environments,
@@ -128,59 +127,60 @@ export function EnvironmentPicker({
   onAction,
   disabled = false,
   allowSame = false,
-  disableSource = false,
-  disableDestination = false,
+  hideSource = false,
+  hideDestination = false,
 }: EnvironmentPickerProps) {
-  const same = !allowSame && sourceId !== "" && sourceId === destinationId;
+  const same =
+    !allowSame &&
+    !hideSource &&
+    !hideDestination &&
+    sourceId !== "" &&
+    sourceId === destinationId;
 
   return (
     <div className="rounded-xl border border-border-muted bg-white p-4">
       <div className="flex flex-wrap items-end gap-4">
-        <div
-          className={cn(
-            "flex min-w-56 flex-1 flex-col gap-1.5",
-            disableSource && "opacity-50",
-          )}
-        >
-          <label className="text-xs font-bold uppercase tracking-wider text-[#003767]">
-            Source environment
-          </label>
-          <EnvironmentSelect
-            environments={environments}
-            value={sourceId}
-            onChange={onSourceChange}
-            mode={mode}
-            role="source"
-            onAction={onAction}
-            placeholder="Select the environment to transfer from"
-            disabled={disabled || disableSource}
-          />
-        </div>
+        {!hideSource && (
+          <div className="flex min-w-56 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-[#003767]">
+              Source environment
+            </label>
+            <EnvironmentSelect
+              environments={environments}
+              value={sourceId}
+              onChange={onSourceChange}
+              mode={mode}
+              role="source"
+              onAction={onAction}
+              placeholder="Select the environment to transfer from"
+              disabled={disabled}
+            />
+          </div>
+        )}
 
-        <div className="hidden pb-2 text-text-subtle sm:block">
-          <Icon path={mdiArrowRightBold} size={1} />
-        </div>
+        {!hideSource && !hideDestination && (
+          <div className="hidden pb-2 text-text-subtle sm:block">
+            <Icon path={mdiArrowRightBold} size={1} />
+          </div>
+        )}
 
-        <div
-          className={cn(
-            "flex min-w-56 flex-1 flex-col gap-1.5",
-            disableDestination && "opacity-50",
-          )}
-        >
-          <label className="text-xs font-bold uppercase tracking-wider text-success-fg">
-            Destination environment
-          </label>
-          <EnvironmentSelect
-            environments={environments}
-            value={destinationId}
-            onChange={onDestinationChange}
-            mode={mode}
-            role="destination"
-            onAction={onAction}
-            placeholder="Select the environment to transfer to"
-            disabled={disabled || disableDestination}
-          />
-        </div>
+        {!hideDestination && (
+          <div className="flex min-w-56 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-success-fg">
+              Destination environment
+            </label>
+            <EnvironmentSelect
+              environments={environments}
+              value={destinationId}
+              onChange={onDestinationChange}
+              mode={mode}
+              role="destination"
+              onAction={onAction}
+              placeholder="Select the environment to transfer to"
+              disabled={disabled}
+            />
+          </div>
+        )}
       </div>
 
       {same && (

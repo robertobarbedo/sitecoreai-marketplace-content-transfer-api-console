@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { mdiCog, mdiEarth, mdiLoading } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
@@ -135,7 +141,11 @@ export default function StandaloneExtension() {
   });
 
   const showToast = useCallback(
-    (title: string, description?: string, variant: ToastVariant = "default") => {
+    (
+      title: string,
+      description?: string,
+      variant: ToastVariant = "default",
+    ) => {
       setToast({ open: true, title, description, variant });
     },
     [],
@@ -281,7 +291,9 @@ export default function StandaloneExtension() {
   /** What the source/destination dropdowns offer in the current mode. */
   const environments = useMemo(
     () =>
-      mode === "organization" ? organizationEnvironments(tenants) : allConnections,
+      mode === "organization"
+        ? organizationEnvironments(tenants)
+        : allConnections,
     [mode, tenants, allConnections],
   );
 
@@ -379,6 +391,49 @@ export default function StandaloneExtension() {
   const organizationMode = mode === "organization";
   const pairReady = !!source && !!destination && source.id !== destination.id;
 
+  /**
+   * The source/destination selection, rendered inside the tabs that use it
+   * (Saved Transfers and Reconciliation pick their own environments). The
+   * selection is page state, so it carries across tabs.
+   */
+  const renderPicker = ({
+    hideSource = false,
+    hideDestination = false,
+    allowSame = false,
+  }: {
+    hideSource?: boolean;
+    hideDestination?: boolean;
+    allowSame?: boolean;
+  } = {}) => (
+    <div className="space-y-2">
+      <EnvironmentPicker
+        environments={environments}
+        mode={mode}
+        sourceId={sourceId}
+        destinationId={destinationId}
+        onSourceChange={setSourceId}
+        onDestinationChange={setDestinationId}
+        onAction={() =>
+          openSettings(organizationMode ? CROSS_ORG_NOTICE : null)
+        }
+        disabled={transferRunning}
+        allowSame={allowSame}
+        hideSource={hideSource}
+        hideDestination={hideDestination}
+      />
+      {organizationMode &&
+        tenants.length < 2 &&
+        !hideSource &&
+        !hideDestination && (
+          <p className="text-sm text-text-subtle">
+            This app is installed on only one environment. Install it on another
+            environment of your organization, or choose &quot;Transfer to
+            another organization…&quot; to use stored credentials.
+          </p>
+        )}
+    </div>
+  );
+
   // ---- Render states ----
 
   if (error) {
@@ -429,252 +484,251 @@ export default function StandaloneExtension() {
 
   return (
     <AuthBoundary appContext={appContext}>
-    <ToastProvider swipeDirection="right">
-      <main className="p-(--spacing-margin-page) min-h-screen bg-surface-bright">
-        <div className="mx-auto max-w-[1280px] space-y-5">
-          <header className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/icon.svg"
-                alt="Content Transfer Console"
-                width={40}
-                height={40}
-                className="shrink-0"
-              />
-              <div>
-                <h1 className="text-lg font-bold text-on-surface">
-                  Content Transfer Console
-                </h1>
-                <p className="text-[11px] text-text-subtle">
-                  Transfer content and media between SitecoreAI environments with
-                  the Content Transfer and Item Transfer APIs.
-                </p>
+      <ToastProvider swipeDirection="right">
+        <main className="p-(--spacing-margin-page) min-h-screen bg-surface-bright">
+          <div className="mx-auto max-w-[1280px] space-y-5">
+            <header className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/icon.svg"
+                  alt="Content Transfer Console"
+                  width={40}
+                  height={40}
+                  className="shrink-0"
+                />
+                <div>
+                  <h1 className="text-lg font-bold text-on-surface">
+                    Content Transfer Console
+                  </h1>
+                  <p className="text-[11px] text-text-subtle">
+                    Transfer content and media between SitecoreAI environments
+                    with the Content Transfer and Item Transfer APIs.
+                  </p>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* The mode switch is tucked into settings, so flag the
+              <div className="flex items-center gap-2">
+                {/* The mode switch is tucked into settings, so flag the
                   non-default mode where it can't be missed. */}
-              {!organizationMode && (
-                <button
-                  type="button"
+                {!organizationMode && (
+                  <button
+                    type="button"
+                    onClick={() => openSettings()}
+                    disabled={transferRunning}
+                    className="flex cursor-pointer items-center gap-1 rounded-full bg-primary-bg px-2.5 py-1 text-xs font-semibold text-primary-fg hover:bg-primary-bg-active disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Transfers use stored credentials and may cross organizations. Click to change."
+                  >
+                    <Icon path={mdiEarth} size={0.6} />
+                    {MODE_LABELS["cross-org"]}
+                  </button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => openSettings()}
                   disabled={transferRunning}
-                  className="flex cursor-pointer items-center gap-1 rounded-full bg-primary-bg px-2.5 py-1 text-xs font-semibold text-primary-fg hover:bg-primary-bg-active disabled:cursor-not-allowed disabled:opacity-50"
-                  title="Transfers use stored credentials and may cross organizations. Click to change."
+                  aria-label="Settings"
                 >
-                  <Icon path={mdiEarth} size={0.6} />
-                  {MODE_LABELS["cross-org"]}
-                </button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => openSettings()}
-                disabled={transferRunning}
-                aria-label="Settings"
-              >
-                <Icon path={mdiCog} />
-              </Button>
-            </div>
-          </header>
+                  <Icon path={mdiCog} />
+                </Button>
+              </div>
+            </header>
 
-          {!organizationMode && allConnections.length === 0 ? (
-            <ConnectionGate
-              onConfigure={() => openSettings()}
-              onUseOrganization={() => handleModeChange("organization")}
-            />
-          ) : (
-            <>
-              <EnvironmentPicker
-                environments={environments}
-                mode={mode}
-                sourceId={sourceId}
-                destinationId={destinationId}
-                onSourceChange={setSourceId}
-                onDestinationChange={setDestinationId}
-                onAction={() =>
-                  openSettings(organizationMode ? CROSS_ORG_NOTICE : null)
-                }
-                disabled={transferRunning}
-                allowSame={activeTab === "backup"}
-                // Backup reads only the source, restore writes only the
-                // destination — grey out the side that isn't used.
-                disableSource={activeTab === "backup" && backupView === "restore"}
-                disableDestination={activeTab === "backup" && backupView === "backup"}
+            {!organizationMode && allConnections.length === 0 ? (
+              <ConnectionGate
+                onConfigure={() => openSettings()}
+                onUseOrganization={() => handleModeChange("organization")}
               />
-              {organizationMode && tenants.length < 2 && (
-                <p className="-mt-2 text-sm text-text-subtle">
-                  This app is installed on only one environment. Install it on
-                  another environment of your organization, or choose
-                  &quot;Transfer to another organization…&quot; to use stored
-                  credentials.
-                </p>
-              )}
-
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
-                  <TabsTrigger value="transfer" disabled={transferRunning}>
-                    Quick Transfer
-                  </TabsTrigger>
-                  <TabsTrigger value="saved" disabled={transferRunning}>
-                    Saved Transfers
-                  </TabsTrigger>
-                  <TabsTrigger value="reconciliation" disabled={transferRunning}>
-                    Reconciliation
-                  </TabsTrigger>
-                  {/* Backup/restore moves chunks through the browser — only
-                      possible over the SDK (Organization mode). */}
-                  {organizationMode && (
-                    <TabsTrigger value="backup" disabled={transferRunning}>
-                      Backup &amp; Restore
+            ) : (
+              <>
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                  <TabsList>
+                    <TabsTrigger value="transfer" disabled={transferRunning}>
+                      Quick Transfer
                     </TabsTrigger>
-                  )}
-                  {/* Item Transfer list/history endpoints aren't in the SDK —
+                    <TabsTrigger value="saved" disabled={transferRunning}>
+                      Saved Transfers
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="reconciliation"
+                      disabled={transferRunning}
+                    >
+                      Reconciliation
+                    </TabsTrigger>
+                    {/* Backup/restore moves chunks through the browser — only
+                      possible over the SDK (Organization mode). */}
+                    {organizationMode && (
+                      <TabsTrigger value="backup" disabled={transferRunning}>
+                        Backup &amp; Restore
+                      </TabsTrigger>
+                    )}
+                    {/* Item Transfer list/history endpoints aren't in the SDK —
                       these tabs exist only in Cross-Organization mode. */}
+                    {!organizationMode && (
+                      <>
+                        <TabsTrigger
+                          value="item-transfers"
+                          disabled={transferRunning}
+                        >
+                          Transfer Details History
+                        </TabsTrigger>
+                        <TabsTrigger value="history" disabled={transferRunning}>
+                          Transfer Timeline
+                        </TabsTrigger>
+                      </>
+                    )}
+                    <TabsTrigger value="advanced" disabled={transferRunning}>
+                      Advanced
+                    </TabsTrigger>
+                  </TabsList>
+                  {/* forceMount keeps a running automatic migration alive when
+                    the user switches tabs (Radix hides it via `hidden`). */}
+                  <TabsContent
+                    value="transfer"
+                    forceMount
+                    className="space-y-4"
+                  >
+                    {renderPicker()}
+                    {pairReady ? (
+                      <AutoMigrationTab
+                        key={`${source.id}->${destination.id}`}
+                        source={source}
+                        destination={destination}
+                        onError={handleApiError}
+                        showToast={showToast}
+                        onRunningChange={setQuickRunning}
+                      />
+                    ) : (
+                      <SelectionHint text="Select a source and a (different) destination environment to start a migration." />
+                    )}
+                  </TabsContent>
+                  <TabsContent value="advanced" className="space-y-4">
+                    {renderPicker()}
+                    {pairReady ? (
+                      <MigrationTab
+                        key={`${source.id}->${destination.id}`}
+                        source={source}
+                        destination={destination}
+                        onError={handleApiError}
+                        showToast={showToast}
+                      />
+                    ) : (
+                      <SelectionHint text="Select a source and a (different) destination environment to start a migration." />
+                    )}
+                  </TabsContent>
                   {!organizationMode && (
                     <>
-                      <TabsTrigger value="item-transfers" disabled={transferRunning}>
-                        Transfer Details History
-                      </TabsTrigger>
-                      <TabsTrigger value="history" disabled={transferRunning}>
-                        Transfer Timeline
-                      </TabsTrigger>
+                      <TabsContent value="item-transfers" className="space-y-4">
+                        {renderPicker({ hideSource: true })}
+                        {destination ? (
+                          <ItemTransfersTab
+                            key={destination.id}
+                            destination={destination}
+                            onError={handleApiError}
+                            showToast={showToast}
+                          />
+                        ) : (
+                          <SelectionHint text="Select a destination environment to inspect its item transfers." />
+                        )}
+                      </TabsContent>
+                      <TabsContent value="history" className="space-y-4">
+                        {renderPicker({ hideSource: true })}
+                        {destination ? (
+                          <HistoryTab
+                            key={destination.id}
+                            destination={destination}
+                            onError={handleApiError}
+                          />
+                        ) : (
+                          <SelectionHint text="Select a destination environment to inspect its consumption history." />
+                        )}
+                      </TabsContent>
                     </>
                   )}
-                  <TabsTrigger value="advanced" disabled={transferRunning}>
-                    Advanced
-                  </TabsTrigger>
-                </TabsList>
-                {/* forceMount keeps a running automatic migration alive when
-                    the user switches tabs (Radix hides it via `hidden`). */}
-                <TabsContent value="transfer" forceMount>
-                  {pairReady ? (
-                    <AutoMigrationTab
-                      key={`${source.id}->${destination.id}`}
-                      source={source}
-                      destination={destination}
-                      onError={handleApiError}
-                      showToast={showToast}
-                      onRunningChange={setQuickRunning}
-                    />
-                  ) : (
-                    <SelectionHint text="Select a source and a (different) destination environment above to start a migration." />
-                  )}
-                </TabsContent>
-                <TabsContent value="advanced">
-                  {pairReady ? (
-                    <MigrationTab
-                      key={`${source.id}->${destination.id}`}
-                      source={source}
-                      destination={destination}
-                      onError={handleApiError}
-                      showToast={showToast}
-                    />
-                  ) : (
-                    <SelectionHint text="Select a source and a (different) destination environment above to start a migration." />
-                  )}
-                </TabsContent>
-                {!organizationMode && (
-                  <>
-                    <TabsContent value="item-transfers">
-                      {destination ? (
-                        <ItemTransfersTab
-                          key={destination.id}
-                          destination={destination}
-                          onError={handleApiError}
-                          showToast={showToast}
-                        />
-                      ) : (
-                        <SelectionHint text="Select a destination environment above to inspect its item transfers." />
-                      )}
+                  {organizationMode && (
+                    // forceMount keeps a running backup/restore alive.
+                    <TabsContent
+                      value="backup"
+                      forceMount
+                      className="space-y-4"
+                    >
+                      {/* Backup reads only the source, restore writes only the
+                        destination — show just the side in use. */}
+                      {renderPicker({
+                        allowSame: true,
+                        hideSource: backupView === "restore",
+                        hideDestination: backupView === "backup",
+                      })}
+                      <BackupRestoreTab
+                        source={source}
+                        destination={destination}
+                        showToast={showToast}
+                        onRunningChange={setBackupRunning}
+                        view={backupView}
+                        onViewChange={setBackupView}
+                      />
                     </TabsContent>
-                    <TabsContent value="history">
-                      {destination ? (
-                        <HistoryTab
-                          key={destination.id}
-                          destination={destination}
-                          onError={handleApiError}
-                        />
-                      ) : (
-                        <SelectionHint text="Select a destination environment above to inspect its consumption history." />
-                      )}
-                    </TabsContent>
-                  </>
-                )}
-                {organizationMode && (
-                  // forceMount keeps a running backup/restore alive.
-                  <TabsContent value="backup" forceMount>
-                    <BackupRestoreTab
-                      source={source}
-                      destination={destination}
-                      showToast={showToast}
-                      onRunningChange={setBackupRunning}
-                      view={backupView}
-                      onViewChange={setBackupView}
-                    />
-                  </TabsContent>
-                )}
-                {/* forceMount so switching tabs doesn't kill an executing
+                  )}
+                  {/* forceMount so switching tabs doesn't kill an executing
                     saved transfer (same reason as the transfer tab). */}
-                <TabsContent value="saved" forceMount>
-                  {client && (
-                    <SavedTransfersTab
-                      client={client}
-                      tenants={tenants}
-                      mode={mode}
-                      environments={environments}
-                      onOpenSettings={openSettings}
-                      onError={handleApiError}
-                      showToast={showToast}
-                      onRunningChange={setSavedRunning}
-                    />
-                  )}
-                </TabsContent>
-                {/* The reconciliation tab talks to the environments via the
+                  <TabsContent value="saved" forceMount>
+                    {client && (
+                      <SavedTransfersTab
+                        client={client}
+                        tenants={tenants}
+                        mode={mode}
+                        environments={environments}
+                        onOpenSettings={openSettings}
+                        onError={handleApiError}
+                        showToast={showToast}
+                        onRunningChange={setSavedRunning}
+                      />
+                    )}
+                  </TabsContent>
+                  {/* The reconciliation tab talks to the environments via the
                     Marketplace SDK (authoring GraphQL), not the stored
                     connections — no source/destination selection needed. */}
-                <TabsContent value="reconciliation">
-                  {client && <ReconciliationTab client={client} />}
-                </TabsContent>
-              </Tabs>
-            </>
-          )}
+                  <TabsContent value="reconciliation">
+                    {client && <ReconciliationTab client={client} />}
+                  </TabsContent>
+                </Tabs>
+              </>
+            )}
 
-          <SettingsDialog
-            open={settingsOpen}
-            onOpenChange={(open) => {
-              setSettingsOpen(open);
-              if (!open) setSettingsNotice(null);
-            }}
-            mode={mode}
-            onModeChange={handleModeChange}
-            modeLocked={transferRunning}
-            notice={settingsNotice}
-            connections={tenantConnections}
-            onSave={handleSaveConnections}
-            tenants={tenants}
-            selectedTenantId={selectedTenantId}
-            onTenantChange={handleTenantChange}
-          />
-        </div>
-      </main>
+            <SettingsDialog
+              open={settingsOpen}
+              onOpenChange={(open) => {
+                setSettingsOpen(open);
+                if (!open) setSettingsNotice(null);
+              }}
+              mode={mode}
+              onModeChange={handleModeChange}
+              modeLocked={transferRunning}
+              notice={settingsNotice}
+              connections={tenantConnections}
+              onSave={handleSaveConnections}
+              tenants={tenants}
+              selectedTenantId={selectedTenantId}
+              onTenantChange={handleTenantChange}
+            />
+          </div>
+        </main>
 
-      <Toast
-        open={toast.open}
-        onOpenChange={(open) => setToast((t) => ({ ...t, open }))}
-        variant={toast.variant}
-        duration={5000}
-      >
-        <div className="flex flex-col gap-0.5">
-          <ToastTitle>{toast.title}</ToastTitle>
-          {toast.description && (
-            <ToastDescription>{toast.description}</ToastDescription>
-          )}
-        </div>
-      </Toast>
-      <ToastViewport />
-    </ToastProvider>
+        <Toast
+          open={toast.open}
+          onOpenChange={(open) => setToast((t) => ({ ...t, open }))}
+          variant={toast.variant}
+          duration={5000}
+        >
+          <div className="flex flex-col gap-0.5">
+            <ToastTitle>{toast.title}</ToastTitle>
+            {toast.description && (
+              <ToastDescription>{toast.description}</ToastDescription>
+            )}
+          </div>
+        </Toast>
+        <ToastViewport />
+      </ToastProvider>
     </AuthBoundary>
   );
 }

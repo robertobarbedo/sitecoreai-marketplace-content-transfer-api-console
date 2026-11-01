@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   mdiCheckCircle,
   mdiAlertCircle,
+  mdiClose,
   mdiFileTree,
   mdiStop,
   mdiArrowRightBold,
@@ -47,10 +48,33 @@ import {
   type AutoMigrationStage,
 } from "@/src/utils/hooks/useAutoMigration";
 import type {
+  DataTree,
   DataTreeScope,
   EnvironmentConnection,
   MergeStrategy,
 } from "@/src/types/transfer";
+
+/** One content tree path line. */
+interface PathRow {
+  id: number;
+  itemPath: string;
+}
+
+let nextRowId = 0;
+const newRow = (itemPath = ""): PathRow => ({ id: nextRowId++, itemPath });
+
+/**
+ * Keeps exactly one empty line at the end — filling the last line (typing,
+ * pasting or picking) opens the next one. Emptied lines in the middle stay
+ * (so clearing one to retype doesn't drop it); they are ignored on start.
+ */
+function withTrailingEmpty(rows: PathRow[]): PathRow[] {
+  let end = rows.length;
+  while (end > 0 && rows[end - 1].itemPath === "") end--;
+  const kept = rows.slice(0, end);
+  // Reuse an existing empty line so its input keeps focus.
+  return [...kept, end < rows.length ? rows[end] : newRow()];
+}
 
 interface AutoMigrationTabProps {
   source: EnvironmentConnection;
@@ -80,13 +104,17 @@ export function AutoMigrationTab({
     return () => onRunningChange?.(false);
   }, [running, onRunningChange]);
 
-  const [itemPath, setItemPath] = useState("");
+  const [rows, setRows] = useState<PathRow[]>(() => [newRow()]);
   const [scope, setScope] = useState<DataTreeScope>("SingleItem");
   const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>(
     "OverrideExistingItem",
   );
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // The line the tree picker fills (null = closed).
+  const [pickerRowId, setPickerRowId] = useState<number | null>(null);
   const [confirmStartOpen, setConfirmStartOpen] = useState(false);
+  // What the running/finished transfer was started with (the lines may be
+  // edited meanwhile).
+  const startedPathsRef = useRef<string[]>([]);
 
   // Surface terminal transitions once (toast on success, onError on failure —
   // which also reopens the settings dialog for credential problems).
@@ -95,9 +123,12 @@ export function AutoMigrationTab({
     if (state.stage === reportedStageRef.current) return;
     reportedStageRef.current = state.stage;
     if (state.stage === "done") {
+      const started = startedPathsRef.current;
       showToast(
         "Transfer complete",
-        `${itemPath.trim()} was transferred from ${source.label} to ${destination.label}.`,
+        `${
+          started.length === 1 ? started[0] : `${started.length} paths`
+        } ${started.length === 1 ? "was" : "were"} transferred from ${source.label} to ${destination.label}.`,
         "success",
       );
     } else if (state.stage === "failed" && !state.cancelled) {
@@ -109,16 +140,51 @@ export function AutoMigrationTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.stage]);
 
-  const pathValid = itemPath.trim().startsWith("/sitecore");
+  const setRowPath = (id: number, itemPath: string) =>
+    setRows((prev) =>
+      withTrailingEmpty(
+        prev.map((row) => (row.id === id ? { ...row, itemPath } : row)),
+      ),
+    );
+
+  const removeRow = (id: number) =>
+    setRows((prev) => withTrailingEmpty(prev.filter((row) => row.id !== id)));
+
+  /** A multi-line paste fills one line per path. Returns false for one line. */
+  const pasteLines = (id: number, text: string) => {
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length < 2) return false;
+    setRows((prev) => {
+      const index = prev.findIndex((row) => row.id === id);
+      return withTrailingEmpty([
+        ...prev.slice(0, index),
+        ...lines.map((line) => newRow(line)),
+        ...prev.slice(index + 1),
+      ]);
+    });
+    return true;
+  };
+
+  // Trimmed, deduped paths of the filled lines.
+  const paths = [
+    ...new Set(rows.map((row) => row.itemPath.trim()).filter(Boolean)),
+  ];
+  const invalidPaths = paths.filter((path) => !path.startsWith("/sitecore"));
+  const pathValid = paths.length > 0 && invalidPaths.length === 0;
   const canStart = pathValid && !running;
 
   const beginMigration = () => {
+    const dataTrees: DataTree[] = paths.map((ItemPath) => ({
+      ItemPath,
+      Scope: scope,
+      MergeStrategy: mergeStrategy,
+    }));
+    startedPathsRef.current = paths;
     reset();
-    start({
-      dataTrees: [
-        { ItemPath: itemPath.trim(), Scope: scope, MergeStrategy: mergeStrategy },
-      ],
-    });
+    start({ dataTrees });
   };
 
   const handleStart = () => setConfirmStartOpen(true);
@@ -131,40 +197,73 @@ export function AutoMigrationTab({
         <CardHeader>
           <CardTitle>Automatic content transfer</CardTitle>
           <CardDescription className="text-muted-foreground">
-            Pick one content tree path and how to merge it — the transfer,
-            chunk copying, .raif generation, consumption into the destination
-            database ({/* hidden default */}master), and cleanup all run
-            automatically. Use the Advanced tab for multiple paths,
-            other databases, or step-by-step control.
+            Pick one or more content tree paths and how to merge them — the
+            transfer, chunk copying, .raif generation, consumption into the
+            destination database ({/* hidden default */}master), and cleanup all
+            run automatically. Use the Advanced tab for a different scope or
+            merge strategy per path, other databases, or step-by-step control.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-start gap-3">
             <div className="flex min-w-72 flex-1 flex-col gap-1.5">
-              <label htmlFor="auto-path" className="text-sm font-medium">
-                Content tree path
+              <label
+                htmlFor={`auto-path-${rows[0].id}`}
+                className="text-sm font-medium"
+              >
+                Content tree paths
               </label>
-              <div className="flex gap-1.5">
-                <Input
-                  id="auto-path"
-                  value={itemPath}
-                  autoComplete="off"
-                  onChange={(e) => setItemPath(e.target.value)}
-                  placeholder="/sitecore/content/Home/MyItem"
-                  className="flex-1 font-mono text-xs"
-                  disabled={running}
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setPickerOpen(true)}
-                  disabled={running}
-                  aria-label="Browse the source content tree"
-                  title="Browse the source content tree"
-                >
-                  <Icon path={mdiFileTree} />
-                </Button>
-              </div>
+              {rows.map((row, index) => {
+                const trailing = index === rows.length - 1;
+                return (
+                  <div key={row.id} className="flex gap-1.5">
+                    <Input
+                      id={`auto-path-${row.id}`}
+                      value={row.itemPath}
+                      autoComplete="off"
+                      onChange={(e) => setRowPath(row.id, e.target.value)}
+                      onPaste={(e) => {
+                        if (
+                          pasteLines(row.id, e.clipboardData.getData("text"))
+                        ) {
+                          e.preventDefault();
+                        }
+                      }}
+                      placeholder={
+                        index === 0
+                          ? "/sitecore/content/Home/MyItem"
+                          : "Add another path (optional)"
+                      }
+                      aria-label={`Content tree path ${index + 1}`}
+                      className="flex-1 font-mono text-xs"
+                      disabled={running}
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPickerRowId(row.id)}
+                      disabled={running}
+                      aria-label="Browse the source content tree"
+                      title="Browse the source content tree"
+                    >
+                      <Icon path={mdiFileTree} />
+                    </Button>
+                    {/* The trailing empty line is where the next path goes —
+                        it keeps the slot so the lines stay aligned. */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeRow(row.id)}
+                      disabled={running || trailing}
+                      className={trailing ? "invisible" : undefined}
+                      aria-label="Remove this path"
+                      title="Remove this path"
+                    >
+                      <Icon path={mdiClose} />
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium">Scope</label>
@@ -226,9 +325,9 @@ export function AutoMigrationTab({
                 Start transfer
               </Button>
             )}
-            {!pathValid && itemPath.trim() !== "" && (
+            {invalidPaths.length > 0 && (
               <p className="text-xs text-danger-fg">
-                The path must start with /sitecore.
+                Every path must start with /sitecore.
               </p>
             )}
           </div>
@@ -282,25 +381,39 @@ export function AutoMigrationTab({
       )}
 
       <TreePickerDialog
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
+        open={pickerRowId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPickerRowId(null);
+        }}
         source={source}
         database="master"
-        onSelect={setItemPath}
+        onSelect={(path) => {
+          if (pickerRowId !== null) setRowPath(pickerRowId, path);
+        }}
       />
 
       <Dialog open={confirmStartOpen} onOpenChange={setConfirmStartOpen}>
         <DialogContent className={overrideTree ? "border-danger" : undefined}>
           <DialogHeader>
-            <DialogTitle className={overrideTree ? "text-danger-fg" : undefined}>
+            <DialogTitle
+              className={overrideTree ? "text-danger-fg" : undefined}
+            >
               Start this transfer?
             </DialogTitle>
             <DialogDescription>
-              <span className="font-mono text-xs">{itemPath.trim()}</span> (
-              {SCOPES.find((s) => s.value === scope)?.label.toLowerCase()}) will
-              be transferred:
+              {paths.length === 1 ? "This path" : `These ${paths.length} paths`}{" "}
+              ({SCOPES.find((s) => s.value === scope)?.label.toLowerCase()})
+              will be transferred:
             </DialogDescription>
           </DialogHeader>
+
+          <ul className="max-h-40 overflow-y-auto rounded-lg border border-border-muted px-3 py-2 font-mono text-xs">
+            {paths.map((path) => (
+              <li key={path} className="truncate" title={path}>
+                {path}
+              </li>
+            ))}
+          </ul>
 
           {/* Transfer direction, using the source/destination color code */}
           <div className="flex flex-wrap items-center justify-center gap-3 py-1">
@@ -336,14 +449,16 @@ export function AutoMigrationTab({
           {overrideTree && (
             <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
               &quot;Override existing tree&quot; replaces the whole tree
-              matching{" "}
-              <span className="font-mono text-xs">{itemPath.trim()}</span> in{" "}
+              matching {paths.length === 1 ? "this path" : "each path"} in{" "}
               {destination.label}.
             </p>
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmStartOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmStartOpen(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -361,4 +476,3 @@ export function AutoMigrationTab({
     </div>
   );
 }
-
