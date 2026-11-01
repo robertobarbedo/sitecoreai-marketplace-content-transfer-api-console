@@ -933,7 +933,6 @@ function RestorePanel({
             assembled the restore can&apos;t be cancelled.
           </>
         }
-        confirmWord="RESTORE"
         confirmLabel="Start restore"
         onConfirm={async () => {
           if (archive) start(archive);

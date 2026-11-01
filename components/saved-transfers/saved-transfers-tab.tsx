@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import {
   mdiArrowLeft,
+  mdiArrowRightBold,
   mdiContentSave,
   mdiDelete,
   mdiFileTree,
@@ -26,6 +27,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -146,7 +155,11 @@ interface SavedTransfersTabProps {
   /** Opens the settings dialog, optionally with an explanatory notice. */
   onOpenSettings: (notice?: string | null) => void;
   onError: (error: unknown, action: string) => void;
-  showToast: (title: string, description?: string, variant?: ToastVariant) => void;
+  showToast: (
+    title: string,
+    description?: string,
+    variant?: ToastVariant,
+  ) => void;
   /** Reports an executing transfer so the page can lock the rest of the UI. */
   onRunningChange?: (running: boolean) => void;
 }
@@ -169,8 +182,12 @@ export function SavedTransfersTab({
   const [transfers, setTransfers] = useState<SavedTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>({ kind: "list" });
-  const [confirmDelete, setConfirmDelete] = useState<SavedTransfer | null>(null);
-  const [confirmExecute, setConfirmExecute] = useState<SavedTransfer | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<SavedTransfer | null>(
+    null,
+  );
+  const [confirmExecute, setConfirmExecute] = useState<SavedTransfer | null>(
+    null,
+  );
 
   // Saved transfers reference ids of one mode's environment list — leave
   // any open form/execution view when the mode changes.
@@ -217,7 +234,11 @@ export function SavedTransfersTab({
       : [...transfers, saved];
     try {
       await persist(next);
-      showToast("Saved transfer stored", `Stored in ${tenants[0].label}.`, "success");
+      showToast(
+        "Saved transfer stored",
+        `Stored in ${tenants[0].label}.`,
+        "success",
+      );
       setView({ kind: "list" });
     } catch (error) {
       onError(error, "save the transfer");
@@ -234,11 +255,7 @@ export function SavedTransfersTab({
       onOpenSettings(switchModeNotice(transfer));
       return;
     }
-    if (transfer.dataTrees.some((t) => t.MergeStrategy === "OverrideExistingTree")) {
-      setConfirmExecute(transfer);
-      return;
-    }
-    setView({ kind: "execute", transfer });
+    setConfirmExecute(transfer);
   };
 
   const connectionFor = (id: string) =>
@@ -291,7 +308,11 @@ export function SavedTransfersTab({
             </p>
           </div>
           <div>
-            <Button variant="outline" size="sm" onClick={() => setView({ kind: "list" })}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setView({ kind: "list" })}
+            >
               <Icon path={mdiArrowLeft} />
               Back to saved transfers
             </Button>
@@ -318,15 +339,21 @@ export function SavedTransfersTab({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border-muted bg-white p-4">
-        <p className="text-sm text-text-subtle">
-          &nbsp;
-        </p>
+        <p className="text-sm text-text-subtle">&nbsp;</p>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refresh}
+            disabled={loading}
+          >
             <Icon path={mdiRefresh} className={loading ? "animate-spin" : ""} />
             Refresh
           </Button>
-          <Button size="sm" onClick={() => setView({ kind: "form", editing: null })}>
+          <Button
+            size="sm"
+            onClick={() => setView({ kind: "form", editing: null })}
+          >
             <Icon path={mdiPlus} />
             New saved transfer
           </Button>
@@ -357,16 +384,21 @@ export function SavedTransfersTab({
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-border-muted bg-surface-grey">
-                  {["Name", "Source → Destination", "Paths", "Reconcile", "Publish", "Actions"].map(
-                    (h) => (
-                      <th
-                        key={h}
-                        className="px-4 py-3 font-mono text-xs font-bold uppercase tracking-wider text-on-surface-variant"
-                      >
-                        {h}
-                      </th>
-                    ),
-                  )}
+                  {[
+                    "Name",
+                    "Source → Destination",
+                    "Paths",
+                    "Reconcile",
+                    "Publish",
+                    "Actions",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 font-mono text-xs font-bold uppercase tracking-wider text-on-surface-variant"
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -400,19 +432,30 @@ export function SavedTransfersTab({
                         />
                         <span className="mx-1 text-text-subtle">→</span>
                         <ConnectionLabel
-                          label={destination?.label ?? transfer.destinationLabel}
+                          label={
+                            destination?.label ?? transfer.destinationLabel
+                          }
                           missing={inMode && !destination}
                         />
                       </td>
                       <td className="px-4 py-3">
                         <ul className="flex flex-col gap-0.5">
                           {transfer.dataTrees.map((tree, index) => (
-                            <li key={index} className="font-mono text-xs" title={tree.ItemPath}>
+                            <li
+                              key={index}
+                              className="font-mono text-xs"
+                              title={tree.ItemPath}
+                            >
                               <span className="inline-block max-w-[280px] truncate align-bottom">
                                 {tree.ItemPath}
                               </span>{" "}
                               <span className="text-text-subtle">
-                                ({SCOPES.find((s) => s.value === tree.Scope)?.label},{" "}
+                                (
+                                {
+                                  SCOPES.find((s) => s.value === tree.Scope)
+                                    ?.label
+                                }
+                                ,{" "}
                                 {
                                   MERGE_STRATEGIES.find(
                                     (s) => s.value === tree.MergeStrategy,
@@ -507,25 +550,46 @@ export function SavedTransfersTab({
         }}
       />
 
-      <ConfirmDestructiveDialog
-        open={confirmExecute !== null}
+      <ConfirmExecuteDialog
+        transfer={confirmExecute}
+        sourceLabel={
+          confirmExecute
+            ? (connectionFor(confirmExecute.sourceConnectionId)?.label ??
+              confirmExecute.sourceLabel)
+            : ""
+        }
+        destinationLabel={
+          confirmExecute
+            ? (connectionFor(confirmExecute.destinationConnectionId)?.label ??
+              confirmExecute.destinationLabel)
+            : ""
+        }
         onOpenChange={(open) => {
           if (!open) setConfirmExecute(null);
         }}
-        title="Override the existing tree?"
-        description={`"${confirmExecute?.name}" uses the "Override existing tree" strategy: the matching tree(s) in ${confirmExecute?.destinationLabel} are replaced, then the transfer runs to completion automatically.`}
-        confirmLabel="Start transferring"
-        onConfirm={async () => {
-          if (confirmExecute) setView({ kind: "execute", transfer: confirmExecute });
+        onConfirm={() => {
+          if (confirmExecute) {
+            setView({ kind: "execute", transfer: confirmExecute });
+          }
+          setConfirmExecute(null);
         }}
       />
     </div>
   );
 }
 
-function ConnectionLabel({ label, missing }: { label: string; missing: boolean }) {
+function ConnectionLabel({
+  label,
+  missing,
+}: {
+  label: string;
+  missing: boolean;
+}) {
   return (
-    <span className={missing ? "text-danger-fg line-through" : undefined} title={missing ? "This connection no longer exists" : undefined}>
+    <span
+      className={missing ? "text-danger-fg line-through" : undefined}
+      title={missing ? "This connection no longer exists" : undefined}
+    >
       {label}
     </span>
   );
@@ -558,7 +622,9 @@ function SavedTransferForm({
     editing?.destinationConnectionId ?? "",
   );
   const [trees, setTrees] = useState<DataTree[]>(
-    editing?.dataTrees.length ? editing.dataTrees.map((t) => ({ ...t })) : [{ ...DEFAULT_TREE }],
+    editing?.dataTrees.length
+      ? editing.dataTrees.map((t) => ({ ...t }))
+      : [{ ...DEFAULT_TREE }],
   );
   const [reconcile, setReconcile] = useState(editing?.reconcile ?? false);
   const [publishAtEnd, setPublishAtEnd] = useState(!!editing?.publish);
@@ -708,7 +774,9 @@ function SavedTransferForm({
               <Input
                 value={tree.ItemPath}
                 autoComplete="off"
-                onChange={(e) => updateTree(index, { ItemPath: e.target.value })}
+                onChange={(e) =>
+                  updateTree(index, { ItemPath: e.target.value })
+                }
                 placeholder="/sitecore/content/Home/MyItem"
                 className="min-w-64 flex-1 font-mono text-xs"
               />
@@ -826,8 +894,8 @@ function SavedTransferForm({
           {reconReady === false && (
             <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-xs text-[#953d00]">
               The Content Reconciliation app needs to be installed and
-              configured before transfers can reconcile — see the
-              Reconciliation tab for more info.
+              configured before transfers can reconcile — see the Reconciliation
+              tab for more info.
             </p>
           )}
         </div>
@@ -843,9 +911,9 @@ function SavedTransferForm({
               Publish at the end
             </label>
             <span className="text-xs text-text-subtle">
-              After the transfer (and the reconciliation, when enabled)
-              succeed, the destination environment is published to Experience
-              Edge. Related items are never included.
+              After the transfer (and the reconciliation, when enabled) succeed,
+              the destination environment is published to Experience Edge.
+              Related items are never included.
             </span>
           </div>
           {publishAtEnd && (
@@ -874,7 +942,9 @@ function SavedTransferForm({
                 <label className="text-sm font-medium">Publish mode</label>
                 <Select
                   value={publishMode}
-                  onValueChange={(value) => setPublishMode(value as PublishMode)}
+                  onValueChange={(value) =>
+                    setPublishMode(value as PublishMode)
+                  }
                 >
                   <SelectTrigger className="w-44" aria-label="Publish mode">
                     <SelectValue />
@@ -899,7 +969,10 @@ function SavedTransferForm({
 
         <div className="flex gap-2">
           <Button onClick={handleSave} disabled={!valid || saving}>
-            <Icon path={saving ? mdiLoading : mdiContentSave} className={saving ? "animate-spin" : ""} />
+            <Icon
+              path={saving ? mdiLoading : mdiContentSave}
+              className={saving ? "animate-spin" : ""}
+            />
             Save
           </Button>
           <Button variant="outline" onClick={onCancel} disabled={saving}>
@@ -917,7 +990,8 @@ function SavedTransferForm({
           source={source}
           database="master"
           onSelect={(path) => {
-            if (pickerIndex !== null) updateTree(pickerIndex, { ItemPath: path });
+            if (pickerIndex !== null)
+              updateTree(pickerIndex, { ItemPath: path });
           }}
         />
       )}
@@ -933,6 +1007,111 @@ type ReconcilePhase = "idle" | "running" | "done" | "failed";
 
 /** skipped = the reconcile step failed, so nothing was published. */
 type PublishPhase = "idle" | "running" | "done" | "failed" | "skipped";
+
+/**
+ * Confirms executing a saved transfer: shows the direction and the paths, and
+ * turns red when a path replaces whole trees in the destination.
+ */
+function ConfirmExecuteDialog({
+  transfer,
+  sourceLabel,
+  destinationLabel,
+  onOpenChange,
+  onConfirm,
+}: {
+  transfer: SavedTransfer | null;
+  sourceLabel: string;
+  destinationLabel: string;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const trees = transfer?.dataTrees ?? [];
+  const overrideTree = trees.some(
+    (t) => t.MergeStrategy === "OverrideExistingTree",
+  );
+  const followUps = [
+    transfer?.reconcile && "reconciliation",
+    transfer?.publish && "publish",
+  ].filter(Boolean);
+
+  return (
+    <Dialog open={transfer !== null} onOpenChange={onOpenChange}>
+      <DialogContent className={overrideTree ? "border-danger" : undefined}>
+        <DialogHeader>
+          <DialogTitle className={overrideTree ? "text-danger-fg" : undefined}>
+            Execute &quot;{transfer?.name}&quot;?
+          </DialogTitle>
+          <DialogDescription>
+            {trees.length === 1 ? "This path" : `These ${trees.length} paths`}{" "}
+            will be transferred
+            {followUps.length > 0 && (
+              <>, followed by {followUps.join(" and ")}</>
+            )}
+            :
+          </DialogDescription>
+        </DialogHeader>
+
+        <ul className="max-h-40 overflow-y-auto rounded-lg border border-border-muted px-3 py-2 font-mono text-xs">
+          {trees.map((tree) => (
+            <li key={tree.ItemPath} className="truncate" title={tree.ItemPath}>
+              {tree.ItemPath}
+            </li>
+          ))}
+        </ul>
+
+        {/* Transfer direction, using the source/destination color code */}
+        <div className="flex flex-wrap items-center justify-center gap-3 py-1">
+          <div className="flex min-w-28 flex-col items-center rounded-lg border border-[#003767]/15 bg-[#c6f1ff] px-4 py-1.5">
+            <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-[#003767]/70">
+              Source
+            </span>
+            <span
+              className="max-w-44 truncate text-xs font-bold text-[#003767]"
+              title={sourceLabel}
+            >
+              {sourceLabel}
+            </span>
+          </div>
+          <Icon
+            path={mdiArrowRightBold}
+            size={0.9}
+            className="shrink-0 text-text-subtle"
+          />
+          <div className="flex min-w-28 flex-col items-center rounded-lg border border-success/20 bg-success-bg px-4 py-1.5">
+            <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-success-fg/70">
+              Destination
+            </span>
+            <span
+              className="max-w-44 truncate text-xs font-bold text-success-fg"
+              title={destinationLabel}
+            >
+              {destinationLabel}
+            </span>
+          </div>
+        </div>
+
+        {overrideTree && (
+          <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
+            This transfer uses the &quot;Override existing tree&quot; strategy:
+            the matching tree(s) in {destinationLabel} are replaced.
+          </p>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            colorScheme={overrideTree ? "danger" : undefined}
+            onClick={onConfirm}
+          >
+            Confirm
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function ExecuteSavedTransfer({
   client,
@@ -950,13 +1129,15 @@ function ExecuteSavedTransfer({
   destination: EnvironmentConnection;
   onBack: () => void;
   onError: (error: unknown, action: string) => void;
-  showToast: (title: string, description?: string, variant?: ToastVariant) => void;
+  showToast: (
+    title: string,
+    description?: string,
+    variant?: ToastVariant,
+  ) => void;
   onRunningChange?: (running: boolean) => void;
 }) {
-  const { state, running, progressByChunkSet, start, cancel } = useAutoMigration(
-    source,
-    destination,
-  );
+  const { state, running, progressByChunkSet, start, cancel } =
+    useAutoMigration(source, destination);
 
   const [reconPhase, setReconPhase] = useState<ReconcilePhase>("idle");
   const [reconProgress, setReconProgress] = useState("");
@@ -1017,7 +1198,7 @@ function ExecuteSavedTransfer({
       } catch {
         languages = ["en"];
         note =
-          "The destination's languages could not be read — publishing \"en\" only.";
+          'The destination\'s languages could not be read — publishing "en" only.';
       }
       setPublishNote(note);
 
@@ -1140,7 +1321,11 @@ function ExecuteSavedTransfer({
           "Content Reconciliation is not (fully) set up — open the Reconciliation tab to see what is missing.",
         );
       }
-      const loadResult = await loadReconciliationData(client, bases[0].env, envs);
+      const loadResult = await loadReconciliationData(
+        client,
+        bases[0].env,
+        envs,
+      );
       if (!loadResult.ok) {
         throw new Error(loadResult.error);
       }
@@ -1304,12 +1489,14 @@ function ExecuteSavedTransfer({
               </p>
             </div>
           )}
-          {state.stage === "done" && !transfer.reconcile && !transfer.publish && (
-            <p className="mt-4 rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
-              Transfer complete — the content is in {destination.label} and all
-              temporary resources were cleaned up.
-            </p>
-          )}
+          {state.stage === "done" &&
+            !transfer.reconcile &&
+            !transfer.publish && (
+              <p className="mt-4 rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
+                Transfer complete — the content is in {destination.label} and
+                all temporary resources were cleaned up.
+              </p>
+            )}
         </CardContent>
       </Card>
 
@@ -1326,40 +1513,47 @@ function ExecuteSavedTransfer({
           done={reconPhase === "done"}
           contentClassName="flex flex-col gap-3"
         >
-            {reconPhase === "running" && (
-              <div className="flex items-center gap-2 text-sm text-text-subtle">
-                <Icon path={mdiLoading} className="animate-spin" />
-                {reconProgress || "Applying the saved reconciliation values…"}
-              </div>
-            )}
-            {reconPhase === "failed" && (
-              <div className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
-                <p className="font-semibold">Reconciliation failed</p>
-                <p className="mt-1">{reconError}</p>
-                <p className="mt-1">
-                  The transfer itself completed. You can run the reconciliation
-                  manually from the Reconciliation tab.
-                </p>
-              </div>
-            )}
-            {reconPhase === "done" && (
-              <div className="flex flex-wrap gap-4 text-sm">
-                <span className="text-success">{reconUpdated.length} updated</span>
-                <span className={reconFailed.length ? "text-danger" : "text-text-subtle"}>
-                  {reconFailed.length} failed
-                </span>
-                <span className="text-text-subtle">
-                  {reconRows.length - reconUpdated.length - reconFailed.length} skipped
-                </span>
-              </div>
-            )}
-            {reconPhase === "done" && reconRows.length === 0 && (
-              <p className="text-sm text-text-subtle">
-                No desired values are stored for this environment — nothing to
-                reconcile.
+          {reconPhase === "running" && (
+            <div className="flex items-center gap-2 text-sm text-text-subtle">
+              <Icon path={mdiLoading} className="animate-spin" />
+              {reconProgress || "Applying the saved reconciliation values…"}
+            </div>
+          )}
+          {reconPhase === "failed" && (
+            <div className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
+              <p className="font-semibold">Reconciliation failed</p>
+              <p className="mt-1">{reconError}</p>
+              <p className="mt-1">
+                The transfer itself completed. You can run the reconciliation
+                manually from the Reconciliation tab.
               </p>
-            )}
-            {reconRows.length > 0 && <ApplyRowsTable rows={reconRows} />}
+            </div>
+          )}
+          {reconPhase === "done" && (
+            <div className="flex flex-wrap gap-4 text-sm">
+              <span className="text-success">
+                {reconUpdated.length} updated
+              </span>
+              <span
+                className={
+                  reconFailed.length ? "text-danger" : "text-text-subtle"
+                }
+              >
+                {reconFailed.length} failed
+              </span>
+              <span className="text-text-subtle">
+                {reconRows.length - reconUpdated.length - reconFailed.length}{" "}
+                skipped
+              </span>
+            </div>
+          )}
+          {reconPhase === "done" && reconRows.length === 0 && (
+            <p className="text-sm text-text-subtle">
+              No desired values are stored for this environment — nothing to
+              reconcile.
+            </p>
+          )}
+          {reconRows.length > 0 && <ApplyRowsTable rows={reconRows} />}
         </CollapsibleCard>
       )}
 
@@ -1385,95 +1579,95 @@ function ExecuteSavedTransfer({
           done={publishPhase === "done"}
           contentClassName="flex flex-col gap-3"
         >
-            {publishPhase === "skipped" && (
-              <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-sm text-[#953d00]">
-                Publishing was skipped because the reconciliation step did not
-                complete cleanly — publish manually once it is fixed.
-              </p>
-            )}
-            {publishPhase === "running" && (
-              <div className="flex items-center gap-2 text-sm text-text-subtle">
-                <Icon path={mdiLoading} className="animate-spin" />
-                Publishing to Experience Edge…
-              </div>
-            )}
-            {publishNote && (
-              <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-xs text-[#953d00]">
-                {publishNote}
-              </p>
-            )}
-            {publishRows.length > 0 && (
+          {publishPhase === "skipped" && (
+            <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-sm text-[#953d00]">
+              Publishing was skipped because the reconciliation step did not
+              complete cleanly — publish manually once it is fixed.
+            </p>
+          )}
+          {publishPhase === "running" && (
+            <div className="flex items-center gap-2 text-sm text-text-subtle">
+              <Icon path={mdiLoading} className="animate-spin" />
+              Publishing to Experience Edge…
+            </div>
+          )}
+          {publishNote && (
+            <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-xs text-[#953d00]">
+              {publishNote}
+            </p>
+          )}
+          {publishRows.length > 0 && (
+            <ul className="flex flex-col gap-1 text-xs">
+              {publishRows.map((row) => (
+                <li
+                  key={row.path}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <span
+                    className="max-w-80 truncate font-mono text-text-subtle"
+                    title={row.path}
+                  >
+                    {row.path}
+                  </span>
+                  {row.operationId ? (
+                    <StateBadge state="Queued" />
+                  ) : (
+                    <>
+                      <StateBadge state="Failed" />
+                      {row.error && (
+                        <span className="text-danger-fg">{row.error}</span>
+                      )}
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {publishJobs.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-text-subtle">
+                Publishing jobs on {destination.label}
+              </span>
               <ul className="flex flex-col gap-1 text-xs">
-                {publishRows.map((row) => (
+                {publishJobs.map((job) => (
                   <li
-                    key={row.path}
+                    key={job.handle}
                     className="flex flex-wrap items-center gap-2"
                   >
                     <span
                       className="max-w-80 truncate font-mono text-text-subtle"
-                      title={row.path}
+                      title={job.name}
                     >
-                      {row.path}
+                      {job.name}
                     </span>
-                    {row.operationId ? (
-                      <StateBadge state="Queued" />
-                    ) : (
-                      <>
-                        <StateBadge state="Failed" />
-                        {row.error && (
-                          <span className="text-danger-fg">{row.error}</span>
-                        )}
-                      </>
+                    <StateBadge state={job.jobState ?? "Unknown"} />
+                    {job.processed !== null && (
+                      <span className="text-text-subtle">
+                        {job.processed} item(s)
+                      </span>
                     )}
                   </li>
                 ))}
               </ul>
-            )}
-            {publishJobs.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-text-subtle">
-                  Publishing jobs on {destination.label}
-                </span>
-                <ul className="flex flex-col gap-1 text-xs">
-                  {publishJobs.map((job) => (
-                    <li
-                      key={job.handle}
-                      className="flex flex-wrap items-center gap-2"
-                    >
-                      <span
-                        className="max-w-80 truncate font-mono text-text-subtle"
-                        title={job.name}
-                      >
-                        {job.name}
-                      </span>
-                      <StateBadge state={job.jobState ?? "Unknown"} />
-                      {job.processed !== null && (
-                        <span className="text-text-subtle">
-                          {job.processed} item(s)
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {publishPhase === "failed" && (
-              <div className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
-                <p className="font-semibold">Publishing failed</p>
-                <p className="mt-1">{publishError}</p>
-                <p className="mt-1">
-                  The transfer itself completed — you can publish the
-                  destination manually.
-                </p>
-              </div>
-            )}
-            {publishPhase === "done" && (
-              <p className="rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
-                {publishJobs.length > 0
-                  ? `Publishing finished — ${publishJobs.filter((j) => j.jobState !== "Failed").length}/${publishJobs.length} job(s) completed on ${destination.label}.`
-                  : `The publish was queued on ${destination.label}.`}
+            </div>
+          )}
+          {publishPhase === "failed" && (
+            <div className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
+              <p className="font-semibold">Publishing failed</p>
+              <p className="mt-1">{publishError}</p>
+              <p className="mt-1">
+                The transfer itself completed — you can publish the destination
+                manually.
               </p>
-            )}
+            </div>
+          )}
+          {publishPhase === "done" && (
+            <p className="rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
+              {publishJobs.length > 0
+                ? `Publishing finished — ${publishJobs.filter((j) => j.jobState !== "Failed").length}/${publishJobs.length} job(s) completed on ${destination.label}.`
+                : `The publish was queued on ${destination.label}.`}
+            </p>
+          )}
         </CollapsibleCard>
       )}
     </div>
