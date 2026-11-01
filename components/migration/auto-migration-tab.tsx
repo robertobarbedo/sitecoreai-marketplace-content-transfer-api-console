@@ -272,7 +272,7 @@ export function AutoMigrationTab({
                 onValueChange={(value) => setScope(value as DataTreeScope)}
                 disabled={running}
               >
-                <SelectTrigger className="w-44" aria-label="Scope">
+                <SelectTrigger className="w-52" aria-label="Scope">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -293,7 +293,7 @@ export function AutoMigrationTab({
                 }
                 disabled={running}
               >
-                <SelectTrigger className="w-60" aria-label="Merge strategy">
+                <SelectTrigger className="w-72" aria-label="Merge strategy">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

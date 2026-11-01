@@ -647,18 +647,7 @@ export default function StandaloneExtension() {
                   )}
                   {organizationMode && (
                     // forceMount keeps a running backup/restore alive.
-                    <TabsContent
-                      value="backup"
-                      forceMount
-                      className="space-y-4"
-                    >
-                      {/* Backup reads only the source, restore writes only the
-                        destination — show just the side in use. */}
-                      {renderPicker({
-                        allowSame: true,
-                        hideSource: backupView === "restore",
-                        hideDestination: backupView === "backup",
-                      })}
+                    <TabsContent value="backup" forceMount>
                       <BackupRestoreTab
                         source={source}
                         destination={destination}
@@ -666,6 +655,13 @@ export default function StandaloneExtension() {
                         onRunningChange={setBackupRunning}
                         view={backupView}
                         onViewChange={setBackupView}
+                        // Backup reads only the source, restore writes only
+                        // the destination — show just the side in use.
+                        picker={renderPicker({
+                          allowSame: true,
+                          hideSource: backupView === "restore",
+                          hideDestination: backupView === "backup",
+                        })}
                       />
                     </TabsContent>
                   )}

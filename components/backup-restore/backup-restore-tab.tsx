@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   mdiAlertCircle,
   mdiArchiveArrowDownOutline,
@@ -89,10 +95,12 @@ interface BackupRestoreTabProps {
   showToast: ShowToast;
   /** Reports a running backup/restore so the page can lock the rest. */
   onRunningChange?: (running: boolean) => void;
-  /** Selected sidebar view — owned by the page, which disables the unused
+  /** Selected sidebar view — owned by the page, which hides the unused
    *  side of the environment picker. */
   view: BackupRestoreView;
   onViewChange: (view: BackupRestoreView) => void;
+  /** The environment picker, shown at the top of the content column. */
+  picker: ReactNode;
 }
 
 export type BackupRestoreView = "backup" | "restore";
@@ -109,6 +117,7 @@ export function BackupRestoreTab({
   onRunningChange,
   view,
   onViewChange: setView,
+  picker,
 }: BackupRestoreTabProps) {
   const [backupRunning, setBackupRunning] = useState(false);
   const [restoreRunning, setRestoreRunning] = useState(false);
@@ -149,7 +158,8 @@ export function BackupRestoreTab({
       </SidebarNav>
 
       {/* Both stay mounted so a running job survives the view switch. */}
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+        {picker}
         <div hidden={view !== "backup"}>
           <BackupPanel
             source={source}
