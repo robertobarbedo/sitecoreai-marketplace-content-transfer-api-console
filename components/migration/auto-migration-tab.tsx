@@ -57,14 +57,22 @@ import type {
   MergeStrategy,
 } from "@/src/types/transfer";
 
-/** One content tree path line. */
+/** One content tree path line, with its own scope and merge strategy. */
 interface PathRow {
   id: number;
   itemPath: string;
+  scope: DataTreeScope;
+  mergeStrategy: MergeStrategy;
 }
 
 let nextRowId = 0;
-const newRow = (itemPath = ""): PathRow => ({ id: nextRowId++, itemPath });
+/** A new line copies the scope and merge strategy of `from` (the line above). */
+const newRow = (itemPath = "", from?: PathRow): PathRow => ({
+  id: nextRowId++,
+  itemPath,
+  scope: from?.scope ?? "SingleItem",
+  mergeStrategy: from?.mergeStrategy ?? "OverrideExistingItem",
+});
 
 /**
  * Keeps exactly one empty line at the end — filling the last line (typing,
@@ -76,8 +84,16 @@ function withTrailingEmpty(rows: PathRow[]): PathRow[] {
   while (end > 0 && rows[end - 1].itemPath === "") end--;
   const kept = rows.slice(0, end);
   // Reuse an existing empty line so its input keeps focus.
-  return [...kept, end < rows.length ? rows[end] : newRow()];
+  return [
+    ...kept,
+    end < rows.length ? rows[end] : newRow("", kept[kept.length - 1]),
+  ];
 }
+
+const scopeLabel = (value: DataTreeScope) =>
+  SCOPES.find((s) => s.value === value)?.label ?? value;
+const mergeLabel = (value: MergeStrategy) =>
+  MERGE_STRATEGIES.find((s) => s.value === value)?.label ?? value;
 
 interface AutoMigrationTabProps {
   source: EnvironmentConnection;
@@ -116,10 +132,6 @@ export function AutoMigrationTab({
   }, [running, onRunningChange]);
 
   const [rows, setRows] = useState<PathRow[]>(() => [newRow()]);
-  const [scope, setScope] = useState<DataTreeScope>("SingleItem");
-  const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>(
-    "OverrideExistingItem",
-  );
   // The line the tree picker fills (null = closed).
   const [pickerRowId, setPickerRowId] = useState<number | null>(null);
   const [confirmStartOpen, setConfirmStartOpen] = useState(false);
@@ -164,6 +176,11 @@ export function AutoMigrationTab({
       ),
     );
 
+  const updateRow = (id: number, update: Partial<PathRow>) =>
+    setRows((prev) =>
+      prev.map((row) => (row.id === id ? { ...row, ...update } : row)),
+    );
+
   const removeRow = (id: number) =>
     setRows((prev) => withTrailingEmpty(prev.filter((row) => row.id !== id)));
 
@@ -178,17 +195,28 @@ export function AutoMigrationTab({
       const index = prev.findIndex((row) => row.id === id);
       return withTrailingEmpty([
         ...prev.slice(0, index),
-        ...lines.map((line) => newRow(line)),
+        ...lines.map((line) => newRow(line, prev[index])),
         ...prev.slice(index + 1),
       ]);
     });
     return true;
   };
 
-  // Trimmed, deduped paths of the filled lines.
-  const paths = [
-    ...new Set(rows.map((row) => row.itemPath.trim()).filter(Boolean)),
-  ];
+  // The filled lines as data trees, trimmed and deduped by path (the first
+  // line of a repeated path wins).
+  const dataTrees: DataTree[] = [];
+  for (const row of rows) {
+    const ItemPath = row.itemPath.trim();
+    if (!ItemPath || dataTrees.some((tree) => tree.ItemPath === ItemPath)) {
+      continue;
+    }
+    dataTrees.push({
+      ItemPath,
+      Scope: row.scope,
+      MergeStrategy: row.mergeStrategy,
+    });
+  }
+  const paths = dataTrees.map((tree) => tree.ItemPath);
   const invalidPaths = paths.filter((path) => !path.startsWith("/sitecore"));
   const pathValid = paths.length > 0 && invalidPaths.length === 0;
   const canStart = pathValid && !running;
@@ -199,11 +227,6 @@ export function AutoMigrationTab({
    * (declining discards what was prepared).
    */
   const handleStart = () => {
-    const dataTrees: DataTree[] = paths.map((ItemPath) => ({
-      ItemPath,
-      Scope: scope,
-      MergeStrategy: mergeStrategy,
-    }));
     startedPathsRef.current = paths;
     reset();
     start({ dataTrees, awaitConfirmation: true });
@@ -220,8 +243,6 @@ export function AutoMigrationTab({
   const startOver = () => {
     reset();
     setRows([newRow()]);
-    setScope("SingleItem");
-    setMergeStrategy("OverrideExistingItem");
   };
 
   // The form gives way to the progress once the user confirmed (or a
@@ -230,7 +251,10 @@ export function AutoMigrationTab({
     state.stage !== "idle" && (state.confirmed || state.stage === "failed");
   const finished = state.stage === "done" || state.stage === "failed";
 
-  const overrideTree = mergeStrategy === "OverrideExistingTree";
+  const overrideTreeCount = dataTrees.filter(
+    (tree) => tree.MergeStrategy === "OverrideExistingTree",
+  ).length;
+  const overrideTree = overrideTreeCount > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -242,115 +266,127 @@ export function AutoMigrationTab({
               Pick one or more content tree paths and how to merge them — the
               transfer, chunk copying, .raif generation, consumption into the
               destination database ({/* hidden default */}master), and cleanup
-              all run automatically. Use the Advanced tab for a different scope
-              or merge strategy per path, other databases, or step-by-step
+              all run automatically. Each path has its own scope and merge
+              strategy. Use the Advanced tab for other databases or step-by-step
               control.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-start gap-3">
-              <div className="flex min-w-72 flex-1 flex-col gap-1.5">
-                <label
-                  htmlFor={`auto-path-${rows[0].id}`}
-                  className="text-sm font-medium"
-                >
+            <div className="flex flex-col gap-1.5">
+              {/* Column labels (md+ only; narrow screens stack each line). */}
+              <div className="hidden gap-1.5 text-sm font-medium md:grid md:grid-cols-[minmax(0,1fr)_2.5rem_13rem_18rem_2.5rem]">
+                <label htmlFor={`auto-path-${rows[0].id}`}>
                   Content tree paths
                 </label>
-                {rows.map((row, index) => {
-                  const trailing = index === rows.length - 1;
-                  return (
-                    <div key={row.id} className="flex gap-1.5">
-                      <Input
-                        id={`auto-path-${row.id}`}
-                        value={row.itemPath}
-                        autoComplete="off"
-                        onChange={(e) => setRowPath(row.id, e.target.value)}
-                        onPaste={(e) => {
-                          if (
-                            pasteLines(row.id, e.clipboardData.getData("text"))
-                          ) {
-                            e.preventDefault();
-                          }
-                        }}
-                        placeholder={
-                          index === 0
-                            ? "/sitecore/content/Home/MyItem"
-                            : "Add another path (optional)"
+                <span />
+                <span>Scope</span>
+                <span>Merge strategy</span>
+              </div>
+              {rows.map((row, index) => {
+                const trailing = index === rows.length - 1;
+                return (
+                  <div
+                    key={row.id}
+                    className="flex flex-wrap gap-1.5 md:grid md:grid-cols-[minmax(0,1fr)_2.5rem_13rem_18rem_2.5rem]"
+                  >
+                    <Input
+                      id={`auto-path-${row.id}`}
+                      value={row.itemPath}
+                      autoComplete="off"
+                      onChange={(e) => setRowPath(row.id, e.target.value)}
+                      onPaste={(e) => {
+                        if (
+                          pasteLines(row.id, e.clipboardData.getData("text"))
+                        ) {
+                          e.preventDefault();
                         }
-                        aria-label={`Content tree path ${index + 1}`}
-                        className="flex-1 font-mono text-xs"
-                        disabled={running}
-                      />
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => setPickerRowId(row.id)}
-                        disabled={running}
-                        aria-label="Browse the source content tree"
-                        title="Browse the source content tree"
+                      }}
+                      placeholder={
+                        index === 0
+                          ? "/sitecore/content/Home/MyItem"
+                          : "Add another path (optional)"
+                      }
+                      aria-label={`Content tree path ${index + 1}`}
+                      className="min-w-60 flex-1 font-mono text-xs"
+                      disabled={running}
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPickerRowId(row.id)}
+                      disabled={running}
+                      aria-label="Browse the source content tree"
+                      title="Browse the source content tree"
+                    >
+                      <Icon path={mdiFileTree} />
+                    </Button>
+                    <Select
+                      value={row.scope}
+                      onValueChange={(value) =>
+                        updateRow(row.id, { scope: value as DataTreeScope })
+                      }
+                      disabled={running}
+                    >
+                      <SelectTrigger
+                        className="w-52 md:w-full"
+                        aria-label={`Scope for path ${index + 1}`}
                       >
-                        <Icon path={mdiFileTree} />
-                      </Button>
-                      {/* The trailing empty line is where the next path goes —
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SCOPES.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={row.mergeStrategy}
+                      onValueChange={(value) =>
+                        updateRow(row.id, {
+                          mergeStrategy: value as MergeStrategy,
+                        })
+                      }
+                      disabled={running}
+                    >
+                      <SelectTrigger
+                        className={`w-72 md:w-full ${
+                          row.mergeStrategy === "OverrideExistingTree"
+                            ? "border-danger text-danger-fg"
+                            : ""
+                        }`}
+                        aria-label={`Merge strategy for path ${index + 1}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MERGE_STRATEGIES.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {/* The trailing empty line is where the next path goes —
                         it keeps the slot so the lines stay aligned. */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeRow(row.id)}
-                        disabled={running || trailing}
-                        className={trailing ? "invisible" : undefined}
-                        aria-label="Remove this path"
-                        title="Remove this path"
-                      >
-                        <Icon path={mdiClose} />
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">Scope</label>
-                <Select
-                  value={scope}
-                  onValueChange={(value) => setScope(value as DataTreeScope)}
-                  disabled={running}
-                >
-                  <SelectTrigger className="w-52" aria-label="Scope">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SCOPES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">Merge strategy</label>
-                <Select
-                  value={mergeStrategy}
-                  onValueChange={(value) =>
-                    setMergeStrategy(value as MergeStrategy)
-                  }
-                  disabled={running}
-                >
-                  <SelectTrigger className="w-72" aria-label="Merge strategy">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MERGE_STRATEGIES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeRow(row.id)}
+                      disabled={running || trailing}
+                      className={trailing ? "invisible" : undefined}
+                      aria-label="Remove this path"
+                      title="Remove this path"
+                    >
+                      <Icon path={mdiClose} />
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
 
-            {mergeStrategy === "OverrideExistingTree" && (
+            {overrideTree && (
               <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
                 &quot;Override existing tree&quot; replaces the whole matching
                 tree in the destination environment.
@@ -472,15 +508,25 @@ export function AutoMigrationTab({
             </DialogTitle>
             <DialogDescription>
               {paths.length === 1 ? "This path" : `These ${paths.length} paths`}{" "}
-              ({SCOPES.find((s) => s.value === scope)?.label.toLowerCase()})
               will be transferred:
             </DialogDescription>
           </DialogHeader>
 
-          <ul className="max-h-40 overflow-y-auto rounded-lg border border-border-muted px-3 py-2 font-mono text-xs">
-            {paths.map((path) => (
-              <li key={path} className="truncate" title={path}>
-                {path}
+          <ul className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-lg border border-border-muted px-3 py-2">
+            {dataTrees.map((tree) => (
+              <li key={tree.ItemPath} className="min-w-0">
+                <p className="truncate font-mono text-xs" title={tree.ItemPath}>
+                  {tree.ItemPath}
+                </p>
+                <p
+                  className={`text-xs ${
+                    tree.MergeStrategy === "OverrideExistingTree"
+                      ? "text-danger-fg"
+                      : "text-text-subtle"
+                  }`}
+                >
+                  {scopeLabel(tree.Scope)} · {mergeLabel(tree.MergeStrategy)}
+                </p>
               </li>
             ))}
           </ul>
@@ -519,8 +565,13 @@ export function AutoMigrationTab({
           {overrideTree && (
             <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
               &quot;Override existing tree&quot; replaces the whole tree
-              matching {paths.length === 1 ? "this path" : "each path"} in{" "}
-              {destination.label}.
+              matching{" "}
+              {overrideTreeCount === 1
+                ? paths.length === 1
+                  ? "this path"
+                  : "the path marked with it"
+                : "each path marked with it"}{" "}
+              in {destination.label}.
             </p>
           )}
 

@@ -215,8 +215,9 @@ attempt runtime testing.** Verification is limited to:
   **Saves always write to the FIRST tenant in the resource list; loads merge
   the item from every tenant** (dedupe by id, earlier tenant wins) because a
   different tenant may have been first in the past. Executing reuses
-  `useAutoMigration` (whose input is now `{ dataTrees: DataTree[] }` — the
-  Content Transfer tab passes a single-tree array) and, when "Reconcile at
+  `useAutoMigration` (whose input is now `{ dataTrees: DataTree[] }` — Quick
+  Transfer passes one tree per path line, each with its own scope and merge
+  strategy) and, when "Reconcile at
   the end" is set, chains a reconciliation apply against the **destination**
   environment via the shared engine in `src/utils/reconciliation-apply.ts`
   (plan → fetch current values → execute; also used by the Reconciliation
