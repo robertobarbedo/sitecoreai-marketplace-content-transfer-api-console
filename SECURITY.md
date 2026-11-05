@@ -12,7 +12,7 @@ Please **don't open a public issue** for a security problem.
 - Preferred: GitHub private vulnerability reporting, on this repository's
   **Security** tab → **Report a vulnerability**
   (https://github.com/robertobarbedo/sitecoreai-marketplace-content-transfer-api-console/security/advisories/new).
-- Or email rb205@proton.me with "SECURITY" in the subject.
+- Or email roberto.barbedo@msqdx.com with "SECURITY" in the subject.
 
 Include what you found, how to reproduce it, and the impact you expect.
 

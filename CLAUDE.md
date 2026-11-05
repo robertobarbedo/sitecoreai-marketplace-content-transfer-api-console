@@ -169,7 +169,7 @@ attempt runtime testing.** Verification is limited to:
   `<link>`, no analytics.
 - Public docs: README, PRIVACY.md, DATA-USAGE.md (Sitecore data usage
   disclosure), TERMS.md, SECURITY.md — keep them in sync with what the code
-  sends/stores. `rb205@proton.me` is an intentional placeholder.
+  sends/stores. The contact address is `roberto.barbedo@msqdx.com`.
 - **Hosts**: `isValidHost` (client.ts) accepts only lowercase
   `*.sitecorecloud.io` names; headers are lowercased before the check, and
   `transferFetch` uses `redirect: "error"` so the token can't follow a

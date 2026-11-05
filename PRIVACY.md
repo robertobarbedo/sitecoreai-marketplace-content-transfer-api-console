@@ -164,7 +164,7 @@ Depending on where you live (for example under the GDPR or CCPA), you may
 have the right to access, correct, delete, restrict or object to the
 processing of your personal data, and to receive a copy of it.
 
-To make a request, email rb205@proton.me with the subject "Data request".
+To make a request, email roberto.barbedo@msqdx.com with the subject "Data request".
 Include your Sitecore Cloud organization ID and, if you know it, your user
 ID, so we can find the matching log lines. We answer within 30 days. The
 only personal data the publisher holds is in the server logs described
@@ -190,5 +190,5 @@ file and reflected in the "Last updated" date at the top.
 
 ## Contact
 
-Questions about this policy: email rb205@proton.me or open an issue at
+Questions about this policy: email roberto.barbedo@msqdx.com or open an issue at
 https://github.com/robertobarbedo/sitecoreai-marketplace-content-transfer-api-console/issues.

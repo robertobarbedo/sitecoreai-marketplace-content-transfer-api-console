@@ -56,5 +56,5 @@ SitecoreAI organization. We may block access if these terms are broken.
 
 ## 8. Contact
 
-Questions about these terms: rb205@proton.me or
+Questions about these terms: roberto.barbedo@msqdx.com or
 [GitHub Issues](https://github.com/robertobarbedo/sitecoreai-marketplace-content-transfer-api-console/issues).
