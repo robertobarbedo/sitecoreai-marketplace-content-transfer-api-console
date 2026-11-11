@@ -1,4 +1,11 @@
 import type { NextConfig } from "next";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+// Shown in the Settings credit line. Bump "version" in package.json to change it.
+const appVersion: string = JSON.parse(
+  readFileSync(join(process.cwd(), "package.json"), "utf8"),
+).version;
 
 // The app only runs inside the SitecoreAI iframe, so framing is limited to
 // SitecoreAI hosts. Override with CSP_FRAME_ANCESTORS (space-separated
@@ -23,6 +30,7 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   pageExtensions: ["ts", "tsx", "js", "jsx"],
   poweredByHeader: false,
+  env: { NEXT_PUBLIC_APP_VERSION: appVersion },
   // No next/image in this app: keeps the optional sharp (LGPL) binary unused
   images: { unoptimized: true },
   async headers() {

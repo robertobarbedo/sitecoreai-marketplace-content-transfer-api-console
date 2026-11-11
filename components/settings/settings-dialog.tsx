@@ -638,8 +638,8 @@ export function SettingsDialog({
           )}
         </DialogFooter>
 
-        <p className="-mt-2 text-left text-[10px] text-text-subtle">
-          Developed by Roberto Barbedo
+        <p className="-mt-2 text-left text-[10px] text-[#94A3B8]">
+          Developed by Roberto Barbedo · v{process.env.NEXT_PUBLIC_APP_VERSION}
         </p>
       </DialogContent>
     </Dialog>
