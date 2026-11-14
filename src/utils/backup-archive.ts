@@ -289,15 +289,19 @@ interface WriteTarget {
  *    cross-origin SitecoreAI iframe → falls through);
  * 2. an OPFS staging file + download (bytes on disk, not in RAM);
  * 3. an in-memory Blob + download (last resort).
- * Must start from a user gesture for (1) to be allowed.
+ * Must start from a user gesture for (1) to be allowed. `autoDownload`
+ * skips (1): no save dialog, the finished ZIP downloads automatically.
  */
-async function resolveWriteTarget(fileName: string): Promise<WriteTarget> {
+async function resolveWriteTarget(
+  fileName: string,
+  autoDownload: boolean,
+): Promise<WriteTarget> {
   const picker = (
     window as unknown as {
       showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle>;
     }
   ).showSaveFilePicker;
-  if (typeof picker === "function") {
+  if (!autoDownload && typeof picker === "function") {
     try {
       const handle = await picker({
         suggestedName: fileName,
@@ -378,9 +382,15 @@ async function resolveWriteTarget(fileName: string): Promise<WriteTarget> {
   };
 }
 
-/** Opens a store-only zip64 archive. Call from a user gesture. */
-export async function createArchiveWriter(fileName: string): Promise<ArchiveWriter> {
-  const target = await resolveWriteTarget(fileName);
+/**
+ * Opens a store-only zip64 archive. Call from a user gesture, unless
+ * `autoDownload` (no save dialog — the ZIP downloads when it is closed).
+ */
+export async function createArchiveWriter(
+  fileName: string,
+  options: { autoDownload?: boolean } = {},
+): Promise<ArchiveWriter> {
+  const target = await resolveWriteTarget(fileName, options.autoDownload ?? false);
   const zipWriter = new ZipWriter(target.sink as unknown as WritableStream, {
     level: 0,
     zip64: true,

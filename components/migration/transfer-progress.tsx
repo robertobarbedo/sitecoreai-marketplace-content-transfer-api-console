@@ -13,8 +13,10 @@ import { EnvBadge, StateBadge } from "@/components/badges";
 import {
   useAutoMigration,
   AUTO_MIGRATION_STAGES,
+  pipelineStages,
 } from "@/src/utils/hooks/useAutoMigration";
 import { summarizeProgress } from "@/src/utils/hooks/useChunkCopy";
+import { formatBytes } from "@/src/utils/backup-archive";
 
 /**
  * The automatic pipeline rendered as a horizontal Blok stepper plus a
@@ -53,6 +55,12 @@ const STAGE_META: Record<
     detail: "Copy chunks to the destination",
     env: "both",
   },
+  backup: {
+    title: "Backup",
+    hint: "Destination",
+    detail: "Back up the destination's current content",
+    env: "destination",
+  },
   complete: {
     title: "Generate",
     hint: "Destination",
@@ -75,11 +83,12 @@ const STAGE_META: Record<
 
 type PipelineState = ReturnType<typeof useAutoMigration>["state"];
 
-/** Index of the running/failed stage; AUTO_MIGRATION_STAGES.length = done. */
+/** Index of the running/failed stage in `pipelineStages`; length = done. */
 function currentStageIndex(state: PipelineState): number {
+  const stages = pipelineStages(state);
   return state.stage === "done"
-    ? AUTO_MIGRATION_STAGES.length
-    : AUTO_MIGRATION_STAGES.indexOf(
+    ? stages.length
+    : stages.indexOf(
         (state.stage === "failed"
           ? (state.failedAt ?? "create")
           : state.stage) as never,
@@ -97,7 +106,7 @@ export function TransferStepper({
 }) {
   const currentIndex = currentStageIndex(state);
 
-  const steps: StepperStep[] = AUTO_MIGRATION_STAGES.map((stage, index) => {
+  const steps: StepperStep[] = pipelineStages(state).map((stage, index) => {
     const status: StepperStatus =
       index < currentIndex
         ? "completed"
@@ -137,10 +146,12 @@ export function TransferStageDetailsCard({
   const currentIndex = currentStageIndex(state);
   if (currentIndex < 0) return null;
 
-  const startedStages = AUTO_MIGRATION_STAGES.slice(
+  const stages = pipelineStages(state);
+  const startedStages = stages.slice(
     0,
-    Math.min(currentIndex + 1, AUTO_MIGRATION_STAGES.length),
+    Math.min(currentIndex + 1, stages.length),
   );
+  const backup = state.backup;
 
   const body = (
     <ol className="flex flex-col gap-3">
@@ -207,6 +218,55 @@ export function TransferStageDetailsCard({
                       );
                     })}
                   </ul>
+                )}
+                {stage === "backup" && backup && (
+                  <div className="flex flex-col gap-0.5 text-xs text-text-subtle">
+                    <span className="font-mono">{backup.fileName}</span>
+                    {backup.progress?.detail && (
+                      <span>{backup.progress.detail}</span>
+                    )}
+                    {backup.progress?.stage === "download" &&
+                      backup.progress.chunksTotal !== undefined && (
+                        <span>
+                          {backup.progress.chunksDone ?? 0}/
+                          {backup.progress.chunksTotal} chunks ·{" "}
+                          {formatBytes(backup.progress.bytes ?? 0)}
+                        </span>
+                      )}
+                    {backup.skippedPaths.length > 0 && (
+                      <span>
+                        Not in the destination yet (nothing to back up):{" "}
+                        <span className="font-mono">
+                          {backup.skippedPaths.join(", ")}
+                        </span>
+                      </span>
+                    )}
+                    {backup.nothingToBackUp && (
+                      <span>
+                        None of the paths exist in the destination yet — no
+                        backup file was needed.
+                      </span>
+                    )}
+                    {backup.delivery && (
+                      <span className="text-success-fg">
+                        Backup saved
+                        {backup.delivery.sizeBytes !== null &&
+                          ` (${formatBytes(backup.delivery.sizeBytes)})`}
+                        {backup.delivery.redeliver && (
+                          <>
+                            {" · "}
+                            <button
+                              type="button"
+                              className="underline"
+                              onClick={backup.delivery.redeliver}
+                            >
+                              download again
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    )}
+                  </div>
                 )}
                 {stage === "consume" &&
                   Object.keys(state.consumption).length > 0 && (

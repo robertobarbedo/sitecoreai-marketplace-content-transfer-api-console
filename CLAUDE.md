@@ -197,6 +197,21 @@ attempt runtime testing.** Verification is limited to:
   discardable). `decline()` or a pre-confirm failure discards everything
   (blobs, source + destination transfer, recent entry). Saved Transfers
   doesn't use the gate.
+  **Confirm options (both off by default):** "Back up <destination> first"
+  (Organization mode only) — the archive is opened on confirm with
+  `createArchiveWriter(name, { autoDownload: true })` (no save dialog: OPFS
+  staging / in-memory, the ZIP downloads automatically when sealed) and
+  handed to `confirm({ backup })`; right after the gate (before complete/consume) the
+  pipeline's `backup` stage (`pipelineStages(state)` hides it otherwise)
+  runs `runContentBackup` (shared with the Backup tab) against the
+  DESTINATION for the paths that exist there (others skipped; trees baked
+  with `OverrideExistingItem`). A failed/cancelled backup discards the
+  prepared transfer — nothing is installed. "Publish to Experience Edge
+  afterwards" — after `done`, `useDestinationPublish` (shared with Saved
+  Transfers, same card `publish-progress-card.tsx`) publishes every
+  transferred path, mode SMART, subitems on, related items off.
+  The Quick Transfer tree picker passes `showSubitemsToggle` ("All subitems"
+  switch beside the selected item, default on) and sets the row's scope.
 - **API quirk (observed in practice):** `GET /transfers/{transferId}` on the
   Item Transfer API can return 404 for a blob-name id even while/after the
   source is consumed. Consumption state must be derived from the

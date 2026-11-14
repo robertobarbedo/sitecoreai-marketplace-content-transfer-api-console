@@ -22,7 +22,10 @@ any credentials, or between organizations with automation clients.
 - **Quick Transfer** — pick a content tree path, scope and merge strategy; the
   app creates the transfer, copies the chunks, assembles and consumes the
   `.raif` into the destination `master` database and cleans up, with a live
-  stage checklist and cancel support
+  stage checklist and cancel support. The tree picker has an "All subitems"
+  switch next to the selected item (on by default). The confirmation can
+  optionally back up the destination's current content first (Organization
+  mode) and smart-publish the transferred paths to Experience Edge afterwards
 - **Advanced** — the same pipeline as four manual steps (create, copy chunk
   sets, consume, clean up) with resume after failure and retry
 - **Saved Transfers** — reusable transfer definitions (source, destination,

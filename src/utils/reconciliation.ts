@@ -245,6 +245,22 @@ export function environmentLabel(env: {
   return env.tenantDisplayName || env.tenantName;
 }
 
+/**
+ * Names what the app actually sees, so a failed destination match points at
+ * the cause (no environments granted / a different set than expected) instead
+ * of leaving the user to guess.
+ */
+export function accessibleEnvironmentsHint(
+  envs: { tenantName: string; tenantDisplayName?: string }[],
+): string {
+  if (envs.length === 0) {
+    return "This app has access to no SitecoreAI environments at all — check the app's resource access in Developer Studio.";
+  }
+  return `Environments this app can access: ${envs
+    .map((e) => environmentLabel(e))
+    .join(", ")}.`;
+}
+
 /** Lowercased alphanumeric form, so "CLHIA / qa" and "clhia-qa" compare. */
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");

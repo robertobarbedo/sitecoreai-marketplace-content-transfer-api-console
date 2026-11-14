@@ -9,9 +9,9 @@ Content Transfer Console
 
 ## 2. Headline
 
-<!-- 343 chars -->
+<!-- 122 chars -->
 
-Move content and media between SitecoreAI environments without chaining API calls by hand. Run a one-click Quick Transfer with a live checklist, step through the Content Transfer and Item Transfer APIs in an Advanced view, save reusable transfers that reconcile and publish at the end, and back up content trees to a ZIP you can restore later.
+Move content and media between SitecoreAI environments in one click, with saved transfers, reconciliation and ZIP backups.
 
 ## 3. Description
 

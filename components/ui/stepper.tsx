@@ -7,10 +7,17 @@ import { cn } from "@/lib/utils";
 /**
  * Blok stepper primitive (https://blok.sitecore.com/primitives/stepper),
  * adapted from the blok.sitecore.com/r/stepper.json registry source with an
- * extra "failed" status for pipeline steps that error out.
+ * extra "failed" status for pipeline steps that error out, and a
+ * "background" status for work that runs on its own without the user having
+ * to wait (static — no glow).
  */
 
-export type StepperStatus = "completed" | "active" | "pending" | "failed";
+export type StepperStatus =
+  | "completed"
+  | "active"
+  | "pending"
+  | "failed"
+  | "background";
 
 export interface StepperStep {
   label: string;
@@ -34,6 +41,7 @@ const stepIconVariants = cva(
           "border-2 border-primary bg-background text-primary animate-step-glow",
         pending: "border-2 border-border bg-background text-muted-foreground",
         failed: "border-2 border-danger bg-danger-bg text-danger-fg",
+        background: "border-2 border-dashed border-primary bg-background text-primary",
       },
       size: {
         default: "size-8 text-sm",
@@ -55,6 +63,7 @@ const stepLabelVariants = cva("font-medium transition-colors", {
       active: "text-foreground",
       pending: "text-muted-foreground",
       failed: "text-danger-fg",
+      background: "text-foreground",
     },
   },
   defaultVariants: {
@@ -69,6 +78,7 @@ const stepDescriptionVariants = cva("text-xs transition-colors", {
       active: "text-muted-foreground",
       pending: "text-muted-foreground/70",
       failed: "text-danger-fg/80",
+      background: "text-primary-fg",
     },
   },
   defaultVariants: {
@@ -99,6 +109,23 @@ const CheckIcon = ({ className }: { className?: string }) => (
     strokeLinejoin="round"
   >
     <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+/** Cloud with an up arrow: work running in the background. */
+const BackgroundIcon = ({ className }: { className?: string }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.25"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5" />
+    <polyline points="9.5 14.5 12 12 14.5 14.5" />
+    <line x1="12" y1="12" x2="12" y2="19" />
   </svg>
 );
 
@@ -139,6 +166,8 @@ function StepperStepItem({
               <CheckIcon className="size-4" />
             ) : status === "failed" ? (
               <CrossIcon className="size-4" />
+            ) : status === "background" ? (
+              <BackgroundIcon className="size-4" />
             ) : (
               <span>{index + 1}</span>
             )}

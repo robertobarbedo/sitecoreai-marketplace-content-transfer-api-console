@@ -592,6 +592,7 @@ export default function StandaloneExtension() {
                     {pairReady ? (
                       <AutoMigrationTab
                         key={`${source.id}->${destination.id}`}
+                        client={client}
                         source={source}
                         destination={destination}
                         onError={handleApiError}

@@ -47,9 +47,21 @@ import {
   MERGE_STRATEGIES,
 } from "@/components/migration/create-transfer-card";
 import {
+  PublishProgressCard,
+  phaseStepStatus,
+} from "@/components/migration/publish-progress-card";
+import {
   useAutoMigration,
   type AutoMigrationStage,
 } from "@/src/utils/hooks/useAutoMigration";
+import { useDestinationPublish } from "@/src/utils/hooks/useDestinationPublish";
+import { isOrganizationEnvironment } from "@/src/utils/environment-client";
+import {
+  archiveFileName,
+  createArchiveWriter,
+  type ArchiveWriter,
+} from "@/src/utils/backup-archive";
+import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import type {
   DataTree,
   DataTreeScope,
@@ -96,6 +108,8 @@ const mergeLabel = (value: MergeStrategy) =>
   MERGE_STRATEGIES.find((s) => s.value === value)?.label ?? value;
 
 interface AutoMigrationTabProps {
+  /** Marketplace SDK client (publishing the destination after the transfer). */
+  client: ClientSDK | null;
   source: EnvironmentConnection;
   destination: EnvironmentConnection;
   onError: (error: unknown, action: string) => void;
@@ -109,6 +123,7 @@ interface AutoMigrationTabProps {
 }
 
 export function AutoMigrationTab({
+  client,
   source,
   destination,
   onError,
@@ -125,7 +140,11 @@ export function AutoMigrationTab({
     decline,
     reset,
   } = useAutoMigration(source, destination);
+  const publisher = useDestinationPublish(client, destination);
 
+  // Lock the rest of the UI while the transfer runs. The publish afterwards
+  // doesn't lock anything — starting over just stops watching it (the
+  // publish itself keeps running in Sitecore).
   useEffect(() => {
     onRunningChange?.(running);
     return () => onRunningChange?.(false);
@@ -135,9 +154,52 @@ export function AutoMigrationTab({
   // The line the tree picker fills (null = closed).
   const [pickerRowId, setPickerRowId] = useState<number | null>(null);
   const [confirmStartOpen, setConfirmStartOpen] = useState(false);
+  // Confirmation options (off by default, reset for every transfer).
+  const [backupFirst, setBackupFirst] = useState(false);
+  const [publishAfter, setPublishAfter] = useState(false);
+  // The backup archive is being opened.
+  const [openingBackup, setOpeningBackup] = useState(false);
   // What the running/finished transfer was started with (the lines may be
   // edited meanwhile).
   const startedPathsRef = useRef<string[]>([]);
+  // Publish was requested for the running/finished transfer.
+  const [publishRequested, setPublishRequested] = useState(false);
+  // Read after the (async) backup archive is opened.
+  const confirmStartOpenRef = useRef(false);
+  useEffect(() => {
+    confirmStartOpenRef.current = confirmStartOpen;
+  }, [confirmStartOpen]);
+  // Destination backups need the SDK (chunks pass through the browser).
+  const backupAvailable = isOrganizationEnvironment(destination);
+
+  /** Smart publish of every transferred path (subitems included). */
+  const runPublish = async () => {
+    const started = startedPathsRef.current;
+    const outcome = await publisher.run({
+      paths: started,
+      mode: "SMART",
+      displayName: (path) => `Content Transfer Console: Quick Transfer — ${path}`,
+    });
+    if (outcome.kind === "failed") {
+      showToast("Publishing failed", outcome.error, "warning");
+    } else if (outcome.kind === "done") {
+      if (outcome.failedCount > 0) {
+        showToast(
+          "Publishing had failures",
+          `${outcome.failedCount} publish operation(s) failed on ${destination.label}.`,
+          "warning",
+        );
+      } else {
+        showToast(
+          "Publish complete",
+          outcome.identified
+            ? `${outcome.jobCount} publishing job(s) finished on ${destination.label}.`
+            : `The publish was queued on ${destination.label}.`,
+          "success",
+        );
+      }
+    }
+  };
 
   // Surface terminal transitions once (toast on success, onError on failure —
   // which also reopens the settings dialog for credential problems).
@@ -146,14 +208,20 @@ export function AutoMigrationTab({
     if (state.stage === reportedStageRef.current) return;
     reportedStageRef.current = state.stage;
     if (state.stage === "done") {
+      // The transfer is the outcome; a requested publish follows on its own.
       const started = startedPathsRef.current;
       showToast(
         "Transfer complete",
         `${
           started.length === 1 ? started[0] : `${started.length} paths`
-        } ${started.length === 1 ? "was" : "were"} transferred from ${source.label} to ${destination.label}.`,
+        } ${started.length === 1 ? "was" : "were"} transferred from ${source.label} to ${destination.label}.${
+          publishRequested
+            ? " Publishing to Experience Edge in the background."
+            : ""
+        }`,
         "success",
       );
+      if (publishRequested) runPublish();
     } else if (state.stage === "failed" && !state.cancelled) {
       onError(
         state.rawError ?? new Error(state.error ?? "The transfer failed."),
@@ -228,20 +296,66 @@ export function AutoMigrationTab({
    */
   const handleStart = () => {
     startedPathsRef.current = paths;
+    setPublishRequested(false);
     reset();
+    publisher.reset();
+    setBackupFirst(false);
+    setPublishAfter(false);
     start({ dataTrees, awaitConfirmation: true });
     setConfirmStartOpen(true);
   };
 
   const closeConfirmation = (confirmed: boolean) => {
+    if (openingBackup) return;
     setConfirmStartOpen(false);
-    if (confirmed) confirm();
-    else decline();
+    if (confirmed) {
+      setPublishRequested(publishAfter);
+      confirm();
+    } else {
+      decline();
+    }
+  };
+
+  /**
+   * Confirm with "back up the destination first": the backup archive is
+   * opened here (no save dialog — it downloads automatically when sealed);
+   * the pipeline fills it right before installing.
+   */
+  const confirmWithBackup = async () => {
+    const createdAt = new Date();
+    const label = `${destination.label} before Quick Transfer`;
+    const fileName = archiveFileName(label, createdAt);
+    setOpeningBackup(true);
+    let archive: ArchiveWriter;
+    try {
+      // No save dialog: the ZIP downloads automatically once it's sealed.
+      archive = await createArchiveWriter(fileName, { autoDownload: true });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        showToast(
+          "Could not create the backup file",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        );
+      }
+      return;
+    } finally {
+      setOpeningBackup(false);
+    }
+    // The pre-staged run may have failed meanwhile.
+    if (!confirmStartOpenRef.current) {
+      await archive.abort().catch(() => {});
+      return;
+    }
+    setConfirmStartOpen(false);
+    setPublishRequested(publishAfter);
+    confirm({ backup: { archive, fileName, createdAt, label } });
   };
 
   /** Clears the finished run and the form for the next transfer. */
   const startOver = () => {
     reset();
+    publisher.reset();
     setRows([newRow()]);
   };
 
@@ -437,13 +551,40 @@ export function AutoMigrationTab({
             )}
           </CardHeader>
           <CardContent>
-            <TransferStepper state={state} />
+            <TransferStepper
+              state={state}
+              extraSteps={
+                publishRequested
+                  ? [
+                      // Runs on its own after the transfer — shown as
+                      // "In background" (static), never as a step to wait on.
+                      publisher.phase === "running"
+                        ? {
+                            label: "Publish",
+                            description: "In background",
+                            status: "background" as const,
+                          }
+                        : {
+                            label: "Publish",
+                            description: "Destination",
+                            status: phaseStepStatus(publisher.phase),
+                          },
+                    ]
+                  : []
+              }
+            />
 
             {state.stage === "done" && (
               <p className="mt-4 flex items-center gap-2 rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
                 <Icon path={mdiCheckCircle} size={0.8} />
                 Transfer complete — the content is in {destination.label} and
                 all temporary resources were cleaned up.
+              </p>
+            )}
+            {state.stage === "done" && publisher.phase === "running" && (
+              <p className="mt-2 px-3 text-sm text-text-subtle">
+                Publishing to Experience Edge in the background — you can start
+                a new transfer, it will finish on its own.
               </p>
             )}
             {state.stage === "failed" && (
@@ -481,6 +622,15 @@ export function AutoMigrationTab({
         />
       )}
 
+      {showProgress && (
+        <PublishProgressCard
+          publish={publisher}
+          destinationLabel={destination.label}
+          description="Transferred paths · Smart · subitems included · related items excluded"
+          defaultOpen={false}
+        />
+      )}
+
       <TreePickerDialog
         open={pickerRowId !== null}
         onOpenChange={(open) => {
@@ -488,8 +638,13 @@ export function AutoMigrationTab({
         }}
         source={source}
         database="master"
-        onSelect={(path) => {
-          if (pickerRowId !== null) setRowPath(pickerRowId, path);
+        showSubitemsToggle
+        onSelect={(path, includeSubitems) => {
+          if (pickerRowId === null) return;
+          updateRow(pickerRowId, {
+            scope: includeSubitems ? "ItemAndDescendants" : "SingleItem",
+          });
+          setRowPath(pickerRowId, path);
         }}
       />
 
@@ -575,14 +730,71 @@ export function AutoMigrationTab({
             </p>
           )}
 
+          <div className="flex flex-col gap-3 rounded-lg border border-border-muted px-3 py-2.5">
+            <label
+              className={`flex items-start gap-2 text-sm ${
+                backupAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-60"
+              }`}
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={backupFirst}
+                disabled={!backupAvailable || openingBackup}
+                onChange={(e) => setBackupFirst(e.target.checked)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="font-medium">
+                  Back up {destination.label} first
+                </span>
+                <span className="text-xs text-text-subtle">
+                  {backupAvailable
+                    ? "Right before the content is installed, these paths are downloaded from the destination into a ZIP that downloads automatically — you can restore it from the Backup & Restore tab."
+                    : "Available in Organization mode only — backups download the content through the browser."}
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={publishAfter}
+                disabled={openingBackup}
+                onChange={(e) => setPublishAfter(e.target.checked)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="font-medium">
+                  Publish to Experience Edge afterwards
+                </span>
+                <span className="text-xs text-text-subtle">
+                  Once the transfer completes, each transferred path is
+                  published in {destination.label} — smart publish, subitems
+                  included, related items excluded.
+                </span>
+              </span>
+            </label>
+          </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => closeConfirmation(false)}>
+            <Button
+              variant="outline"
+              onClick={() => closeConfirmation(false)}
+              disabled={openingBackup}
+            >
               Cancel
             </Button>
             <Button
               colorScheme={overrideTree ? "danger" : undefined}
-              onClick={() => closeConfirmation(true)}
+              onClick={() =>
+                backupFirst && backupAvailable
+                  ? confirmWithBackup()
+                  : closeConfirmation(true)
+              }
+              disabled={openingBackup}
             >
+              {openingBackup && (
+                <Icon path={mdiLoading} className="animate-spin" />
+              )}
               Start transfer
             </Button>
           </DialogFooter>

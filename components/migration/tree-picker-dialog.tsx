@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   mdiChevronRight,
   mdiChevronDown,
@@ -65,7 +65,13 @@ interface TreePickerDialogProps {
   source: EnvironmentConnection;
   /** Database to browse, e.g. "master". */
   database: string;
-  onSelect: (path: string) => void;
+  /**
+   * `includeSubitems` is the "All subitems" switch shown next to the
+   * selected item (only with `showSubitemsToggle`; always true otherwise).
+   */
+  onSelect: (path: string, includeSubitems: boolean) => void;
+  /** Show the "All subitems" switch next to the selected item (default on). */
+  showSubitemsToggle?: boolean;
 }
 
 /**
@@ -78,9 +84,11 @@ export function TreePickerDialog({
   source,
   database,
   onSelect,
+  showSubitemsToggle = false,
 }: TreePickerDialogProps) {
   const [root, setRoot] = useState<TreeNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [includeSubitems, setIncludeSubitems] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadingRoot, setLoadingRoot] = useState(false);
 
@@ -96,6 +104,7 @@ export function TreePickerDialog({
     let cancelled = false;
     setRoot(null);
     setSelectedPath(null);
+    setIncludeSubitems(true);
     setError(null);
     setLoadingRoot(true);
     (async () => {
@@ -171,7 +180,7 @@ export function TreePickerDialog({
 
   const handleConfirm = () => {
     if (!selectedPath) return;
-    onSelect(selectedPath);
+    onSelect(selectedPath, showSubitemsToggle ? includeSubitems : true);
     onOpenChange(false);
   };
 
@@ -200,6 +209,14 @@ export function TreePickerDialog({
               selectedPath={selectedPath}
               onToggle={handleToggle}
               onSelect={setSelectedPath}
+              selectedExtra={
+                showSubitemsToggle ? (
+                  <SubitemsToggle
+                    checked={includeSubitems}
+                    onChange={setIncludeSubitems}
+                  />
+                ) : undefined
+              }
             />
           ) : null}
         </div>
@@ -228,18 +245,68 @@ export function TreePickerDialog({
   );
 }
 
+/**
+ * "All subitems: on/off" switch shown next to the selected item: on = the
+ * item and its descendants, off = the single item only.
+ */
+function SubitemsToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label="All subitems"
+      title={
+        checked
+          ? "Includes the item and all its subitems"
+          : "Includes only this item"
+      }
+      onClick={() => onChange(!checked)}
+      className="inline-flex items-center gap-2 whitespace-nowrap rounded-md text-xs"
+    >
+      <span>
+        All subitems:{" "}
+        <span className="font-semibold">{checked ? "on" : "off"}</span>
+      </span>
+      <span
+        aria-hidden
+        className={cn(
+          "relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors",
+          checked ? "bg-primary" : "bg-neutral-bg-active",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 size-3 rounded-full bg-white shadow transition-transform",
+            checked ? "translate-x-3.5" : "translate-x-0.5",
+          )}
+        />
+      </span>
+    </button>
+  );
+}
+
 function TreeNodeRow({
   node,
   depth,
   selectedPath,
   onToggle,
   onSelect,
+  selectedExtra,
 }: {
   node: TreeNode;
   depth: number;
   selectedPath: string | null;
   onToggle: (node: TreeNode) => void;
   onSelect: (path: string) => void;
+  /** Rendered at the end of the selected row. */
+  selectedExtra?: ReactNode;
 }) {
   const selected = selectedPath === node.path;
 
@@ -289,6 +356,9 @@ function TreeNodeRow({
           />
           <span className="truncate text-sm">{node.name}</span>
         </button>
+        {selected && selectedExtra && (
+          <div className="ml-auto shrink-0 pl-3">{selectedExtra}</div>
+        )}
       </div>
 
       {node.expanded && node.children && (
@@ -309,6 +379,7 @@ function TreeNodeRow({
                 selectedPath={selectedPath}
                 onToggle={onToggle}
                 onSelect={onSelect}
+                selectedExtra={selectedExtra}
               />
             ))
           )}

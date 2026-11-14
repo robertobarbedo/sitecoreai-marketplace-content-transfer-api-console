@@ -7,6 +7,7 @@ import {
   completeChunkSet,
   createTransfer,
   deleteTransfer,
+  fetchItemChildren,
   getBlobSourceState,
   getTransferStatus,
   isMediaPath,
@@ -16,6 +17,12 @@ import {
   startConsume,
 } from "@/src/utils/environment-client";
 import { useChunkCopy } from "@/src/utils/hooks/useChunkCopy";
+import {
+  BackupCancelledError,
+  runContentBackup,
+  type BackupProgress,
+} from "@/src/utils/hooks/useContentBackup";
+import type { ArchiveDelivery, ArchiveWriter } from "@/src/utils/backup-archive";
 import {
   upsertRecentTransfer,
   recordRaifFile,
@@ -46,17 +53,52 @@ export type AutoMigrationStage =
   | "create"
   | "snapshot"
   | "copy"
+  | "backup"
   | "complete"
   | "consume"
   | "cleanup"
   | "done"
   | "failed";
 
-/** Pipeline stages in execution order (for checklist rendering). */
+/**
+ * Pipeline stages in execution order (for checklist rendering). "backup"
+ * only runs when the user asked for a destination backup — render the list
+ * from `pipelineStages(state)`.
+ */
 export const AUTO_MIGRATION_STAGES: Exclude<
   AutoMigrationStage,
   "idle" | "done" | "failed"
->[] = ["create", "snapshot", "copy", "complete", "consume", "cleanup"];
+>[] = ["create", "snapshot", "copy", "backup", "complete", "consume", "cleanup"];
+
+/** The stages this run goes through (without "backup" unless requested). */
+export function pipelineStages(state: { backup?: unknown }) {
+  return state.backup
+    ? AUTO_MIGRATION_STAGES
+    : AUTO_MIGRATION_STAGES.filter((stage) => stage !== "backup");
+}
+
+/**
+ * Back up the destination's current content before installing (Organization
+ * mode only). The archive must be opened inside the confirm click's user
+ * gesture (`createArchiveWriter`), so it is handed over ready to write.
+ */
+export interface PreTransferBackup {
+  archive: ArchiveWriter;
+  fileName: string;
+  createdAt: Date;
+  label: string;
+}
+
+export interface PreTransferBackupState {
+  fileName: string;
+  progress?: BackupProgress;
+  /** Paths that don't exist in the destination yet (nothing to back up). */
+  skippedPaths: string[];
+  /** None of the paths exist in the destination — no archive was written. */
+  nothingToBackUp?: boolean;
+  /** Set once the archive is saved. */
+  delivery?: ArchiveDelivery;
+}
 
 export interface AutoMigrationInput {
   /** One or more content trees to move in a single transfer operation. */
@@ -102,6 +144,8 @@ export interface AutoMigrationState {
   raifFiles: Record<string, string>;
   /** .raif source name → consumption progress */
   consumption: Record<string, ConsumptionProgress>;
+  /** Present when the destination is backed up before installing. */
+  backup?: PreTransferBackupState;
 }
 
 const IDLE_STATE: AutoMigrationState = {
@@ -150,6 +194,8 @@ export function useAutoMigration(
   // gate; releaseGateRef wakes a pipeline already waiting there.
   const confirmedRef = useRef(true);
   const releaseGateRef = useRef<(() => void) | null>(null);
+  // Destination backup requested with the go-ahead (see confirm()).
+  const backupRef = useRef<PreTransferBackup | null>(null);
 
   // Stop the pipeline if the hook's owner unmounts mid-run.
   useEffect(() => {
@@ -181,6 +227,7 @@ export function useAutoMigration(
       cancelledRef.current = false;
       confirmedRef.current = !input.awaitConfirmation;
       releaseGateRef.current = null;
+      backupRef.current = null;
       resetProgress();
       const organization = isOrganizationEnvironment(source);
       const mode = modeOf(source);
@@ -370,6 +417,88 @@ export function useAutoMigration(
         ensureNotCancelled();
       };
 
+      // The backup failed (or was cancelled) before anything was installed:
+      // discard the prepared transfer like a declined run.
+      let backupFailed = false;
+      let backupStarted = false;
+
+      /**
+       * Backs up what the destination holds at the transferred paths, right
+       * before anything is pushed into it. Paths that don't exist there yet
+       * have nothing to back up and are skipped.
+       */
+      const backupDestination = async () => {
+        const backup = backupRef.current;
+        if (!backup) return;
+        backupStarted = true;
+        const setBackup = (update: Partial<PreTransferBackupState>) =>
+          setState((prev) => ({
+            ...prev,
+            backup: {
+              fileName: backup.fileName,
+              skippedPaths: [],
+              ...prev.backup,
+              ...update,
+            },
+          }));
+        patch({ stage: "backup" });
+        let handedOff = false;
+        try {
+          const existing: DataTree[] = [];
+          const skippedPaths: string[] = [];
+          for (const tree of trees) {
+            ensureNotCancelled();
+            const result = await fetchItemChildren(
+              destination,
+              tree.ItemPath,
+              DATABASE,
+            );
+            if (result.item) {
+              // Restoring the backup overwrites the items with their
+              // pre-transfer versions.
+              existing.push({ ...tree, MergeStrategy: "OverrideExistingItem" });
+            } else {
+              skippedPaths.push(tree.ItemPath);
+            }
+          }
+          setBackup({ skippedPaths });
+          if (existing.length === 0) {
+            await backup.archive.abort().catch(() => {});
+            setBackup({ nothingToBackUp: true });
+            return;
+          }
+          handedOff = true;
+          const { delivery } = await runContentBackup(
+            destination,
+            {
+              label: backup.label,
+              dataTrees: existing,
+              archive: backup.archive,
+              fileName: backup.fileName,
+              createdAt: backup.createdAt,
+            },
+            (progress) => setBackup({ progress }),
+            () => cancelledRef.current,
+          );
+          setBackup({ delivery, progress: undefined });
+        } catch (error) {
+          backupFailed = true;
+          if (!handedOff) await backup.archive.abort().catch(() => {});
+          if (
+            error instanceof CancelledError ||
+            error instanceof BackupCancelledError ||
+            cancelledRef.current
+          ) {
+            throw new CancelledError();
+          }
+          throw new Error(
+            `The backup of ${destination.label} failed, so nothing was transferred: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      };
+
       setState({
         ...IDLE_STATE,
         stage: "create",
@@ -461,7 +590,12 @@ export function useAutoMigration(
 
         // Organization mode stops before completing: the SDK cannot discard
         // an assembled .raif, so a declined run must not leave one behind.
-        if (organization) await waitForConfirmation();
+        if (organization) {
+          await waitForConfirmation();
+          // 3b. Optional destination backup — nothing is assembled or
+          // installed in the destination yet.
+          await backupDestination();
+        }
 
         // 4. Complete each chunk set into a .raif file.
         patch({ stage: "complete" });
@@ -488,7 +622,12 @@ export function useAutoMigration(
 
         // Cross-Organization stops after completing (the blobs are uploaded
         // and can still be discarded on decline).
-        if (!organization) await waitForConfirmation();
+        if (!organization) {
+          await waitForConfirmation();
+          // Not offered in Cross-Organization mode (backups need the SDK);
+          // kept here so the backup always runs right before consumption.
+          await backupDestination();
+        }
 
         // 5. Consume each .raif into the destination database.
         const sourceNames = Object.values(raifFiles);
@@ -531,11 +670,21 @@ export function useAutoMigration(
         const cancelled =
           error instanceof CancelledError || cancelledRef.current;
 
+        // A destination archive opened for a backup that never ran.
+        if (backupRef.current && !backupStarted) {
+          await backupRef.current.archive.abort().catch(() => {});
+        }
+
         // Declined (or failed) before the go-ahead: the user never asked for
         // this transfer, so discard what was prepared and return to idle.
-        const discarded = !confirmedRef.current;
+        // A failed/cancelled destination backup also discards it (nothing
+        // was installed yet) but reports the failure.
+        const declined = !confirmedRef.current;
+        const discarded = declined || backupFailed;
         if (discarded) {
-          if (cancelled) setState((prev) => ({ ...prev, stage: "cleanup" }));
+          if (cancelled && declined) {
+            setState((prev) => ({ ...prev, stage: "cleanup" }));
+          }
           for (const name of preparedRaifs) {
             await callTransferApi<void>(
               destination,
@@ -549,7 +698,7 @@ export function useAutoMigration(
             await deleteTransfer(destination, transferId).catch(() => {});
             removeRecentTransfer(transferId);
           }
-          if (cancelled) {
+          if (cancelled && declined) {
             setState(IDLE_STATE);
             return;
           }
@@ -589,12 +738,25 @@ export function useAutoMigration(
     releaseGateRef.current?.();
   }, [cancelChunkSet]);
 
-  /** Go-ahead for a pre-staged run: install once the upload is done. */
-  const confirm = useCallback(() => {
-    confirmedRef.current = true;
-    patch({ confirmed: true });
-    releaseGateRef.current?.();
-  }, [patch]);
+  /**
+   * Go-ahead for a pre-staged run: install once the upload is done —
+   * optionally backing up the destination first (`backup`).
+   */
+  const confirm = useCallback(
+    (options?: { backup?: PreTransferBackup }) => {
+      const backup = options?.backup ?? null;
+      backupRef.current = backup;
+      confirmedRef.current = true;
+      patch({
+        confirmed: true,
+        backup: backup
+          ? { fileName: backup.fileName, skippedPaths: [] }
+          : undefined,
+      });
+      releaseGateRef.current?.();
+    },
+    [patch],
+  );
 
   /** Decline a pre-staged run: stop it and discard what was prepared. */
   const decline = useCallback(() => {

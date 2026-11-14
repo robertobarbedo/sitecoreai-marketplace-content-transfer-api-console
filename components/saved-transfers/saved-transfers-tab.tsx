@@ -9,7 +9,6 @@ import {
   mdiDelete,
   mdiFileTree,
   mdiLoading,
-  mdiCloudUploadOutline,
   mdiPencil,
   mdiPlaylistPlus,
   mdiPlus,
@@ -42,7 +41,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StateBadge } from "@/components/badges";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { ConfirmDestructiveDialog } from "@/components/confirm-destructive-dialog";
 import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
@@ -56,7 +54,7 @@ import {
   TransferStageDetailsCard,
   TransferStepper,
 } from "@/components/migration/transfer-progress";
-import type { StepperStatus, StepperStep } from "@/components/ui/stepper";
+import type { StepperStep } from "@/components/ui/stepper";
 import { ApplyRowsTable } from "@/components/reconciliation/apply-rows-table";
 import { useAutoMigration } from "@/src/utils/hooks/useAutoMigration";
 import {
@@ -65,20 +63,17 @@ import {
 } from "@/src/utils/saved-transfers-store";
 import {
   detectReconciliationMarkers,
-  environmentLabel,
   getReconciliationEnvironments,
   isReconciliationReady,
   loadReconciliationData,
   matchEnvironmentToConnection,
+  accessibleEnvironmentsHint,
 } from "@/src/utils/reconciliation";
+import { useDestinationPublish } from "@/src/utils/hooks/useDestinationPublish";
 import {
-  fetchPublishJobs,
-  getEnvironmentLanguages,
-  startPublish,
-  watchPublishJobs,
-  type PublishJobInfo,
-  type PublishRequestRow,
-} from "@/src/utils/publish";
+  PublishProgressCard,
+  phaseStepStatus,
+} from "@/components/migration/publish-progress-card";
 import { cn } from "@/lib/utils";
 import {
   planApplyRows,
@@ -115,22 +110,6 @@ const PUBLISH_MODES: { value: PublishMode; label: string }[] = [
 ];
 
 type ToastVariant = "default" | "success" | "error" | "warning";
-
-/**
- * Names what the app actually sees, so a failed destination match points at
- * the cause (no environments granted / a different set than expected) instead
- * of leaving the user to guess.
- */
-function accessibleEnvironmentsHint(
-  envs: { tenantName: string; tenantDisplayName?: string }[],
-): string {
-  if (envs.length === 0) {
-    return "This app has access to no SitecoreAI environments at all — check the app's resource access in Developer Studio.";
-  }
-  return `Environments this app can access: ${envs
-    .map((e) => environmentLabel(e))
-    .join(", ")}.`;
-}
 
 /** Entries saved before modes existed used stored connections. */
 function savedTransferMode(transfer: SavedTransfer): TransferMode {
@@ -1005,8 +984,6 @@ function SavedTransferForm({
 
 type ReconcilePhase = "idle" | "running" | "done" | "failed";
 
-/** skipped = the reconcile step failed, so nothing was published. */
-type PublishPhase = "idle" | "running" | "done" | "failed" | "skipped";
 
 /**
  * Confirms executing a saved transfer: shows the direction and the paths, and
@@ -1144,21 +1121,9 @@ function ExecuteSavedTransfer({
   const [reconRows, setReconRows] = useState<ApplyRow[]>([]);
   const [reconError, setReconError] = useState("");
 
-  const [publishPhase, setPublishPhase] = useState<PublishPhase>("idle");
-  const [publishRows, setPublishRows] = useState<PublishRequestRow[]>([]);
-  const [publishJobs, setPublishJobs] = useState<PublishJobInfo[]>([]);
-  const [publishError, setPublishError] = useState("");
-  /** Non-fatal notes: languages fallback, unobservable jobs, timeout. */
-  const [publishNote, setPublishNote] = useState("");
-
-  // Publishing polls the destination's jobs; stop when the view unmounts.
-  const activeRef = useRef(true);
-  useEffect(() => {
-    activeRef.current = true;
-    return () => {
-      activeRef.current = false;
-    };
-  }, []);
+  const publisher = useDestinationPublish(client, destination);
+  const publishPhase = publisher.phase;
+  const { run: runPublisher, skip: skipPublish } = publisher;
 
   // Auto-start once, deferred a tick: React StrictMode (dev) runs mount →
   // cleanup → mount, and the hook's unmount cleanup flags the run as
@@ -1177,127 +1142,39 @@ function ExecuteSavedTransfer({
   const runPublish = useCallback(async () => {
     const publish = transfer.publish;
     if (!publish) return;
-    setPublishPhase("running");
-    setPublishError("");
-    try {
-      // The publish always targets the DESTINATION environment, resolved to
-      // its SitecoreAI tenant the same way the reconcile step resolves it.
-      const envs = await getReconciliationEnvironments(client);
-      const target = matchEnvironmentToConnection(envs, destination);
-      if (!target) {
-        throw new Error(
-          `Could not match the destination environment (${destination.label}, ${destination.host}) to any SitecoreAI environment this app can access — publishing needs the matching environment's authoring GraphQL. ${accessibleEnvironmentsHint(envs)}`,
-        );
-      }
-
-      let languages: string[];
-      let note = "";
-      try {
-        languages = await getEnvironmentLanguages(client, target.contextId);
-        if (languages.length === 0) throw new Error("No languages returned");
-      } catch {
-        languages = ["en"];
-        note =
-          'The destination\'s languages could not be read — publishing "en" only.';
-      }
-      setPublishNote(note);
-
-      const paths =
+    const outcome = await runPublisher({
+      paths:
         publish.target === "EntireTree"
           ? ["/sitecore"]
-          : [...new Set(transfer.dataTrees.map((t) => t.ItemPath))];
-
-      // Snapshot the jobs BEFORE firing, so ours are the ones that appear.
-      const baseline = new Set(
-        (await fetchPublishJobs(client, target.contextId).catch(() => [])).map(
-          (job) => job.handle,
-        ),
+          : transfer.dataTrees.map((t) => t.ItemPath),
+      mode: publish.mode,
+      displayName: (path) =>
+        `Content Transfer Console: ${transfer.name} — ${path}`,
+    });
+    if (outcome.kind === "failed") {
+      showToast(
+        "Transfer complete, publishing failed",
+        outcome.error,
+        "warning",
       );
-
-      const rows: PublishRequestRow[] = [];
-      for (const path of paths) {
-        try {
-          const operationId = await startPublish(client, target.contextId, {
-            rootItemPath: path,
-            mode: publish.mode,
-            languages,
-            displayName: `Content Transfer Console: ${transfer.name} — ${path}`,
-          });
-          rows.push({ path, operationId });
-        } catch (error) {
-          rows.push({
-            path,
-            operationId: null,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        setPublishRows([...rows]);
-      }
-
-      const failedRows = rows.filter((r) => r.operationId === null);
-      if (failedRows.length === rows.length) {
-        throw new Error(
-          failedRows[0]?.error ?? "No publish operation could be started.",
-        );
-      }
-
-      const watch = await watchPublishJobs(
-        client,
-        target.contextId,
-        baseline,
-        rows.length - failedRows.length,
-        setPublishJobs,
-        () => activeRef.current,
-      );
-      if (!activeRef.current) return;
-
-      if (!watch.identified) {
-        setPublishNote((prev) =>
-          [
-            prev,
-            "The publish operation was queued, but its job did not show up in the destination's job list — check the publishing dashboard for progress.",
-          ]
-            .filter(Boolean)
-            .join(" "),
-        );
-      } else if (watch.timedOut) {
-        setPublishNote((prev) =>
-          [
-            prev,
-            "Stopped watching after 10 minutes — the publishing job(s) are still running on the destination.",
-          ]
-            .filter(Boolean)
-            .join(" "),
-        );
-      }
-      setPublishPhase("done");
-
-      const failedJobs = watch.jobs.filter((j) => j.jobState === "Failed");
-      if (failedRows.length > 0 || failedJobs.length > 0) {
+    } else if (outcome.kind === "done") {
+      if (outcome.failedCount > 0) {
         showToast(
           "Transfer complete, publishing had failures",
-          `${failedRows.length + failedJobs.length} publish operation(s) failed on ${destination.label}.`,
+          `${outcome.failedCount} publish operation(s) failed on ${destination.label}.`,
           "warning",
         );
       } else {
         showToast(
           "Transfer and publish complete",
-          watch.identified
-            ? `${watch.jobs.length} publishing job(s) finished on ${destination.label}.`
+          outcome.identified
+            ? `${outcome.jobCount} publishing job(s) finished on ${destination.label}.`
             : `The publish was queued on ${destination.label}.`,
           "success",
         );
       }
-    } catch (error) {
-      setPublishError(error instanceof Error ? error.message : String(error));
-      setPublishPhase("failed");
-      showToast(
-        "Transfer complete, publishing failed",
-        error instanceof Error ? error.message : String(error),
-        "warning",
-      );
     }
-  }, [client, destination, transfer, showToast]);
+  }, [destination, transfer, runPublisher, showToast]);
 
   const runReconcile = useCallback(async () => {
     setReconPhase("running");
@@ -1353,7 +1230,7 @@ function ExecuteSavedTransfer({
           "warning",
         );
         // Don't push known-wrong values to Edge.
-        if (transfer.publish) setPublishPhase("skipped");
+        if (transfer.publish) skipPublish();
       } else {
         showToast(
           "Transfer and reconciliation complete",
@@ -1366,9 +1243,9 @@ function ExecuteSavedTransfer({
       setReconProgress("");
       setReconError(error instanceof Error ? error.message : String(error));
       setReconPhase("failed");
-      if (transfer.publish) setPublishPhase("skipped");
+      if (transfer.publish) skipPublish();
     }
-  }, [client, destination, transfer, runPublish, showToast]);
+  }, [client, destination, transfer, runPublish, skipPublish, showToast]);
 
   // Surface terminal transitions once; chain reconciliation, then publish.
   const reportedStageRef = useRef(state.stage);
@@ -1402,16 +1279,6 @@ function ExecuteSavedTransfer({
   const reconFailed = reconRows.filter((r) => r.status === "failed");
 
   // Extra stepper steps for the chained phases ("skipped" renders pending).
-  const phaseStepStatus = (
-    phase: ReconcilePhase | PublishPhase,
-  ): StepperStatus =>
-    phase === "running"
-      ? "active"
-      : phase === "done"
-        ? "completed"
-        : phase === "failed"
-          ? "failed"
-          : "pending";
   const extraSteps: StepperStep[] = [
     ...(transfer.reconcile
       ? [
@@ -1557,10 +1424,10 @@ function ExecuteSavedTransfer({
         </CollapsibleCard>
       )}
 
-      {transfer.publish && publishPhase !== "idle" && (
-        <CollapsibleCard
-          icon={mdiCloudUploadOutline}
-          title={`Publish — ${destination.label}`}
+      {transfer.publish && (
+        <PublishProgressCard
+          publish={publisher}
+          destinationLabel={destination.label}
           description={
             <>
               {
@@ -1576,99 +1443,8 @@ function ExecuteSavedTransfer({
               {" · related items excluded"}
             </>
           }
-          done={publishPhase === "done"}
-          contentClassName="flex flex-col gap-3"
-        >
-          {publishPhase === "skipped" && (
-            <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-sm text-[#953d00]">
-              Publishing was skipped because the reconciliation step did not
-              complete cleanly — publish manually once it is fixed.
-            </p>
-          )}
-          {publishPhase === "running" && (
-            <div className="flex items-center gap-2 text-sm text-text-subtle">
-              <Icon path={mdiLoading} className="animate-spin" />
-              Publishing to Experience Edge…
-            </div>
-          )}
-          {publishNote && (
-            <p className="rounded-lg bg-[#ffe6bd] px-3 py-2 text-xs text-[#953d00]">
-              {publishNote}
-            </p>
-          )}
-          {publishRows.length > 0 && (
-            <ul className="flex flex-col gap-1 text-xs">
-              {publishRows.map((row) => (
-                <li
-                  key={row.path}
-                  className="flex flex-wrap items-center gap-2"
-                >
-                  <span
-                    className="max-w-80 truncate font-mono text-text-subtle"
-                    title={row.path}
-                  >
-                    {row.path}
-                  </span>
-                  {row.operationId ? (
-                    <StateBadge state="Queued" />
-                  ) : (
-                    <>
-                      <StateBadge state="Failed" />
-                      {row.error && (
-                        <span className="text-danger-fg">{row.error}</span>
-                      )}
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-          {publishJobs.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-text-subtle">
-                Publishing jobs on {destination.label}
-              </span>
-              <ul className="flex flex-col gap-1 text-xs">
-                {publishJobs.map((job) => (
-                  <li
-                    key={job.handle}
-                    className="flex flex-wrap items-center gap-2"
-                  >
-                    <span
-                      className="max-w-80 truncate font-mono text-text-subtle"
-                      title={job.name}
-                    >
-                      {job.name}
-                    </span>
-                    <StateBadge state={job.jobState ?? "Unknown"} />
-                    {job.processed !== null && (
-                      <span className="text-text-subtle">
-                        {job.processed} item(s)
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {publishPhase === "failed" && (
-            <div className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg">
-              <p className="font-semibold">Publishing failed</p>
-              <p className="mt-1">{publishError}</p>
-              <p className="mt-1">
-                The transfer itself completed — you can publish the destination
-                manually.
-              </p>
-            </div>
-          )}
-          {publishPhase === "done" && (
-            <p className="rounded-lg bg-success-bg px-3 py-2 text-sm text-success-fg">
-              {publishJobs.length > 0
-                ? `Publishing finished — ${publishJobs.filter((j) => j.jobState !== "Failed").length}/${publishJobs.length} job(s) completed on ${destination.label}.`
-                : `The publish was queued on ${destination.label}.`}
-            </p>
-          )}
-        </CollapsibleCard>
+          skippedText="Publishing was skipped because the reconciliation step did not complete cleanly — publish manually once it is fixed."
+        />
       )}
     </div>
   );
