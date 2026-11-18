@@ -98,6 +98,8 @@ function currentStageIndex(state: PipelineState): number {
 
 /** How long each already-finished stage "runs" in the staged reveal. */
 const REVEAL_STEP_MS = 600;
+/** The first stage (Create) runs shorter, so the reveal starts promptly. */
+const REVEAL_FIRST_STEP_MS = 300;
 
 /**
  * Staged reveal for stages that finished in the background before the
@@ -133,7 +135,7 @@ export function useStagedReveal(
     }
     const timer = setTimeout(
       () => setReveal((index) => (index === null ? null : index + 1)),
-      REVEAL_STEP_MS,
+      reveal === 0 ? REVEAL_FIRST_STEP_MS : REVEAL_STEP_MS,
     );
     return () => clearTimeout(timer);
   }, [reveal, realIndex, failed]);
