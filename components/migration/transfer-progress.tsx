@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { mdiAlertCircle, mdiCheckCircle, mdiOpenInNew } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -112,20 +112,18 @@ export function useStagedReveal(
   shown: boolean,
 ): number | undefined {
   const [reveal, setReveal] = useState<number | null>(null);
-  const wasShownRef = useRef(false);
+  const [prevShown, setPrevShown] = useState(shown);
   const realIndex = currentStageIndex(state);
   const failed = state.stage === "failed";
 
-  useEffect(() => {
-    const wasShown = wasShownRef.current;
-    wasShownRef.current = shown;
-    if (!shown) {
-      setReveal(null);
-      return;
-    }
+  // Adjusted during render (not in an effect) so the very first paint of the
+  // progress already shows the reveal — an effect would flash the real,
+  // completed stages for one frame before resetting them.
+  if (shown !== prevShown) {
+    setPrevShown(shown);
     // Only on the transition to visible, and only when stages already ran.
-    if (!wasShown && !failed && realIndex > 0) setReveal(0);
-  }, [shown, failed, realIndex]);
+    setReveal(shown && !failed && realIndex > 0 ? 0 : null);
+  }
 
   useEffect(() => {
     if (reveal === null) return;
