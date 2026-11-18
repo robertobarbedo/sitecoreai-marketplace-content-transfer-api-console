@@ -97,9 +97,9 @@ function currentStageIndex(state: PipelineState): number {
 }
 
 /** How long each already-finished stage "runs" in the staged reveal. */
-const REVEAL_STEP_MS = 600;
+const REVEAL_STEP_MS = 500;
 /** The first stage (Create) runs shorter, so the reveal starts promptly. */
-const REVEAL_FIRST_STEP_MS = 300;
+const REVEAL_FIRST_STEP_MS = 250;
 
 /**
  * Staged reveal for stages that finished in the background before the
