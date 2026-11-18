@@ -307,21 +307,13 @@ export function TreePickerDialog({
                 : `${checkedPaths.length} item${checkedPaths.length === 1 ? "" : "s"} selected`}
             </span>
             {checkedPaths.length > 0 && (
-              <>
-                <span
-                  className="min-w-0 flex-1 truncate font-mono"
-                  title={checkedPaths.join("\n")}
-                >
-                  {checkedPaths.join(", ")}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setChecked(new Map())}
-                  className="ml-auto shrink-0 cursor-pointer underline hover:text-on-surface"
-                >
-                  Clear
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={() => setChecked(new Map())}
+                className="ml-auto shrink-0 cursor-pointer underline hover:text-on-surface"
+              >
+                Clear
+              </button>
             )}
           </div>
         ) : (
