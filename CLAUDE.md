@@ -212,6 +212,11 @@ attempt runtime testing.** Verification is limited to:
   transferred path, mode SMART, subitems on, related items off.
   The Quick Transfer tree picker passes `showSubitemsToggle` ("All subitems"
   switch beside the selected item, default on) and sets the row's scope.
+  It also passes `onSelectMany` (multi-select mode: a checkbox per item, an
+  "All subitems" switch per checked item): on confirm `pickLines` fills the
+  line Browse was opened from with the first item and inserts the rest below
+  it (paths already on another line are skipped). Other tabs keep the
+  single-select picker.
 - **API quirk (observed in practice):** `GET /transfers/{transferId}` on the
   Item Transfer API can return 404 for a blob-name id even while/after the
   source is consumed. Consumption state must be derived from the

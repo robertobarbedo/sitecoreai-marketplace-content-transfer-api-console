@@ -37,7 +37,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { TreePickerDialog } from "@/components/migration/tree-picker-dialog";
+import {
+  TreePickerDialog,
+  type PickedTreeItem,
+} from "@/components/migration/tree-picker-dialog";
 import {
   TransferStageDetailsCard,
   TransferStepper,
@@ -270,6 +273,45 @@ export function AutoMigrationTab({
     return true;
   };
 
+  /**
+   * The tree picker's multi-select: the first picked item fills line `id`,
+   * the others are inserted right below it (each with its own scope, the
+   * merge strategy copied from line `id`). Paths already on another line
+   * are skipped.
+   */
+  const pickLines = (id: number, items: PickedTreeItem[]) =>
+    setRows((prev) => {
+      const index = prev.findIndex((row) => row.id === id);
+      if (index < 0) return prev;
+      const base = prev[index];
+      const taken = new Set(
+        prev
+          .filter((row) => row.id !== id)
+          .map((row) => row.itemPath.trim().toLowerCase())
+          .filter(Boolean),
+      );
+      const picked: PathRow[] = [];
+      for (const item of items) {
+        const key = item.path.toLowerCase();
+        if (taken.has(key)) continue;
+        taken.add(key);
+        const scope: DataTreeScope = item.includeSubitems
+          ? "ItemAndDescendants"
+          : "SingleItem";
+        picked.push(
+          picked.length === 0
+            ? { ...base, itemPath: item.path, scope }
+            : { ...newRow(item.path, base), scope },
+        );
+      }
+      if (picked.length === 0) return prev;
+      return withTrailingEmpty([
+        ...prev.slice(0, index),
+        ...picked,
+        ...prev.slice(index + 1),
+      ]);
+    });
+
   // The filled lines as data trees, trimmed and deduped by path (the first
   // line of a repeated path wins).
   const dataTrees: DataTree[] = [];
@@ -377,12 +419,9 @@ export function AutoMigrationTab({
           <CardHeader>
             <CardTitle>Automatic content transfer</CardTitle>
             <CardDescription className="text-muted-foreground">
-              Pick one or more content tree paths and how to merge them — the
-              transfer, chunk copying, .raif generation, consumption into the
-              destination database ({/* hidden default */}master), and cleanup
-              all run automatically. Each path has its own scope and merge
-              strategy. Use the Advanced tab for other databases or step-by-step
-              control.
+              Transfers the selected paths into the destination&rsquo;s master
+              database in one run. For other databases or step-by-step control,
+              use the Advanced tab.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -641,10 +680,11 @@ export function AutoMigrationTab({
         showSubitemsToggle
         onSelect={(path, includeSubitems) => {
           if (pickerRowId === null) return;
-          updateRow(pickerRowId, {
-            scope: includeSubitems ? "ItemAndDescendants" : "SingleItem",
-          });
-          setRowPath(pickerRowId, path);
+          pickLines(pickerRowId, [{ path, includeSubitems }]);
+        }}
+        onSelectMany={(items) => {
+          if (pickerRowId === null) return;
+          pickLines(pickerRowId, items);
         }}
       />
 

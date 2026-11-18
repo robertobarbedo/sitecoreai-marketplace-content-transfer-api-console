@@ -7,6 +7,8 @@ import {
   mdiLoading,
   mdiFileDocumentOutline,
   mdiAlertCircle,
+  mdiCheckboxBlankOutline,
+  mdiCheckboxMarked,
 } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { cn } from "@/lib/utils";
@@ -58,6 +60,12 @@ function mapNode(
   };
 }
 
+/** One item picked in multi-select mode. */
+export interface PickedTreeItem {
+  path: string;
+  includeSubitems: boolean;
+}
+
 interface TreePickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -72,6 +80,12 @@ interface TreePickerDialogProps {
   onSelect: (path: string, includeSubitems: boolean) => void;
   /** Show the "All subitems" switch next to the selected item (default on). */
   showSubitemsToggle?: boolean;
+  /**
+   * Multi-select mode: every item gets a checkbox and several items can be
+   * picked before closing. Confirming calls this (in the order the items
+   * were checked) instead of `onSelect`.
+   */
+  onSelectMany?: (items: PickedTreeItem[]) => void;
 }
 
 /**
@@ -85,10 +99,16 @@ export function TreePickerDialog({
   database,
   onSelect,
   showSubitemsToggle = false,
+  onSelectMany,
 }: TreePickerDialogProps) {
+  const multiSelect = Boolean(onSelectMany);
   const [root, setRoot] = useState<TreeNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [includeSubitems, setIncludeSubitems] = useState(true);
+  // Multi-select: checked path -> its "All subitems" switch, in check order.
+  const [checked, setChecked] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [loadingRoot, setLoadingRoot] = useState(false);
 
@@ -105,6 +125,7 @@ export function TreePickerDialog({
     setRoot(null);
     setSelectedPath(null);
     setIncludeSubitems(true);
+    setChecked(new Map());
     setError(null);
     setLoadingRoot(true);
     (async () => {
@@ -178,7 +199,40 @@ export function TreePickerDialog({
     }
   };
 
+  /** Multi-select: checking adds the item (subitems on), unchecking drops it. */
+  const toggleChecked = (path: string) =>
+    setChecked((prev) => {
+      const next = new Map(prev);
+      if (next.has(path)) next.delete(path);
+      else next.set(path, true);
+      return next;
+    });
+
+  const setCheckedSubitems = (path: string, value: boolean) =>
+    setChecked((prev) => {
+      if (!prev.has(path)) return prev;
+      const next = new Map(prev);
+      next.set(path, value);
+      return next;
+    });
+
+  const checkedPaths = Array.from(checked.keys());
+  const canConfirm = multiSelect
+    ? checkedPaths.length > 0
+    : Boolean(selectedPath);
+
   const handleConfirm = () => {
+    if (multiSelect) {
+      if (checkedPaths.length === 0) return;
+      onSelectMany?.(
+        Array.from(checked, ([path, subitems]) => ({
+          path,
+          includeSubitems: showSubitemsToggle ? subitems : true,
+        })),
+      );
+      onOpenChange(false);
+      return;
+    }
     if (!selectedPath) return;
     onSelect(selectedPath, showSubitemsToggle ? includeSubitems : true);
     onOpenChange(false);
@@ -188,11 +242,16 @@ export function TreePickerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Select an item from {source.label}</DialogTitle>
+          <DialogTitle>
+            {multiSelect ? "Select items" : "Select an item"} from{" "}
+            {source.label}
+          </DialogTitle>
           <DialogDescription>
             Browsing the <span className="font-mono">{database.trim() || "master"}</span>{" "}
-            database of the source environment. Click an item to select it,
-            use the chevrons to expand.
+            database of the source environment.{" "}
+            {multiSelect
+              ? "Check every item you need — each one fills its own path line. Use the chevrons to expand."
+              : "Click an item to select it, use the chevrons to expand."}
           </DialogDescription>
         </DialogHeader>
 
@@ -208,9 +267,21 @@ export function TreePickerDialog({
               depth={0}
               selectedPath={selectedPath}
               onToggle={handleToggle}
-              onSelect={setSelectedPath}
+              onSelect={multiSelect ? toggleChecked : setSelectedPath}
+              checked={multiSelect ? checked : undefined}
+              onCheck={toggleChecked}
+              renderCheckedExtra={
+                multiSelect && showSubitemsToggle
+                  ? (path) => (
+                      <SubitemsToggle
+                        checked={checked.get(path) ?? true}
+                        onChange={(value) => setCheckedSubitems(path, value)}
+                      />
+                    )
+                  : undefined
+              }
               selectedExtra={
-                showSubitemsToggle ? (
+                !multiSelect && showSubitemsToggle ? (
                   <SubitemsToggle
                     checked={includeSubitems}
                     onChange={setIncludeSubitems}
@@ -228,16 +299,45 @@ export function TreePickerDialog({
           </div>
         )}
 
-        <div className="truncate rounded-lg bg-neutral-bg px-3 py-2 font-mono text-xs text-neutral-fg">
-          {selectedPath ?? "No item selected"}
-        </div>
+        {multiSelect ? (
+          <div className="flex items-center gap-2 rounded-lg bg-neutral-bg px-3 py-2 text-xs text-neutral-fg">
+            <span className="shrink-0 font-semibold">
+              {checkedPaths.length === 0
+                ? "No items selected"
+                : `${checkedPaths.length} item${checkedPaths.length === 1 ? "" : "s"} selected`}
+            </span>
+            {checkedPaths.length > 0 && (
+              <>
+                <span
+                  className="min-w-0 flex-1 truncate font-mono"
+                  title={checkedPaths.join("\n")}
+                >
+                  {checkedPaths.join(", ")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setChecked(new Map())}
+                  className="ml-auto shrink-0 cursor-pointer underline hover:text-on-surface"
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="truncate rounded-lg bg-neutral-bg px-3 py-2 font-mono text-xs text-neutral-fg">
+            {selectedPath ?? "No item selected"}
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleConfirm} disabled={!selectedPath}>
-            Use this path
+          <Button onClick={handleConfirm} disabled={!canConfirm}>
+            {multiSelect && checkedPaths.length > 1
+              ? `Use these ${checkedPaths.length} paths`
+              : "Use this path"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -299,6 +399,9 @@ function TreeNodeRow({
   onToggle,
   onSelect,
   selectedExtra,
+  checked,
+  onCheck,
+  renderCheckedExtra,
 }: {
   node: TreeNode;
   depth: number;
@@ -307,8 +410,15 @@ function TreeNodeRow({
   onSelect: (path: string) => void;
   /** Rendered at the end of the selected row. */
   selectedExtra?: ReactNode;
+  /** Multi-select mode: the checked paths (undefined = no checkboxes). */
+  checked?: Map<string, boolean>;
+  onCheck?: (path: string) => void;
+  /** Multi-select mode: rendered at the end of each checked row. */
+  renderCheckedExtra?: (path: string) => ReactNode;
 }) {
-  const selected = selectedPath === node.path;
+  const multiSelect = checked !== undefined;
+  const isChecked = checked?.has(node.path) ?? false;
+  const selected = multiSelect ? isChecked : selectedPath === node.path;
 
   return (
     <div>
@@ -342,6 +452,26 @@ function TreeNodeRow({
             className={node.loading ? "animate-spin" : ""}
           />
         </button>
+        {multiSelect && (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={isChecked}
+            aria-label={`Select ${node.name}`}
+            onClick={() => onCheck?.(node.path)}
+            className={cn(
+              "flex size-5 shrink-0 cursor-pointer items-center justify-center rounded",
+              isChecked
+                ? "text-primary"
+                : "text-text-subtle hover:text-on-surface",
+            )}
+          >
+            <Icon
+              path={isChecked ? mdiCheckboxMarked : mdiCheckboxBlankOutline}
+              size={0.75}
+            />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onSelect(node.path)}
@@ -356,8 +486,13 @@ function TreeNodeRow({
           />
           <span className="truncate text-sm">{node.name}</span>
         </button>
-        {selected && selectedExtra && (
+        {!multiSelect && selected && selectedExtra && (
           <div className="ml-auto shrink-0 pl-3">{selectedExtra}</div>
+        )}
+        {multiSelect && isChecked && renderCheckedExtra && (
+          <div className="ml-auto shrink-0 pl-3">
+            {renderCheckedExtra(node.path)}
+          </div>
         )}
       </div>
 
@@ -380,6 +515,9 @@ function TreeNodeRow({
                 onToggle={onToggle}
                 onSelect={onSelect}
                 selectedExtra={selectedExtra}
+                checked={checked}
+                onCheck={onCheck}
+                renderCheckedExtra={renderCheckedExtra}
               />
             ))
           )}
