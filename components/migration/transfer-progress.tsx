@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { mdiAlertCircle, mdiCheckCircle, mdiOpenInNew } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,16 +96,84 @@ function currentStageIndex(state: PipelineState): number {
       );
 }
 
+/** How long each already-finished stage "runs" in the staged reveal. */
+const REVEAL_STEP_MS = 600;
+
+/**
+ * Staged reveal for stages that finished in the background before the
+ * progress became visible (Quick Transfer pre-stages behind its confirm
+ * dialog). When `shown` turns true while stages are already done, returns a
+ * cap that walks 0 → real index, one stage per `REVEAL_STEP_MS`, so each one
+ * briefly shows as running; returns `undefined` once caught up (or when
+ * nothing was pre-completed), after which the real progress shows as-is.
+ */
+export function useStagedReveal(
+  state: PipelineState,
+  shown: boolean,
+): number | undefined {
+  const [reveal, setReveal] = useState<number | null>(null);
+  const wasShownRef = useRef(false);
+  const realIndex = currentStageIndex(state);
+  const failed = state.stage === "failed";
+
+  useEffect(() => {
+    const wasShown = wasShownRef.current;
+    wasShownRef.current = shown;
+    if (!shown) {
+      setReveal(null);
+      return;
+    }
+    // Only on the transition to visible, and only when stages already ran.
+    if (!wasShown && !failed && realIndex > 0) setReveal(0);
+  }, [shown, failed, realIndex]);
+
+  useEffect(() => {
+    if (reveal === null) return;
+    if (failed || reveal >= realIndex) {
+      setReveal(null);
+      return;
+    }
+    const timer = setTimeout(
+      () => setReveal((index) => (index === null ? null : index + 1)),
+      REVEAL_STEP_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [reveal, realIndex, failed]);
+
+  return reveal ?? undefined;
+}
+
+/**
+ * The index to display and whether it is capped by a staged reveal (a capped
+ * index always shows as running, never as failed).
+ */
+function displayedStageIndex(
+  state: PipelineState,
+  revealIndex: number | undefined,
+): { index: number; capped: boolean } {
+  const real = currentStageIndex(state);
+  if (revealIndex !== undefined && revealIndex < real) {
+    return { index: revealIndex, capped: true };
+  }
+  return { index: real, capped: false };
+}
+
 /** The horizontal pipeline stepper — render it inside your own card. */
 export function TransferStepper({
   state,
   extraSteps = [],
+  revealIndex,
 }: {
   state: PipelineState;
   /** Post-transfer steps (reconcile, publish) appended after cleanup. */
   extraSteps?: StepperStep[];
+  /** Cap from `useStagedReveal`. */
+  revealIndex?: number;
 }) {
-  const currentIndex = currentStageIndex(state);
+  const { index: currentIndex, capped } = displayedStageIndex(
+    state,
+    revealIndex,
+  );
 
   const steps: StepperStep[] = pipelineStages(state).map((stage, index) => {
     const status: StepperStatus =
@@ -112,7 +181,7 @@ export function TransferStepper({
         ? "completed"
         : index > currentIndex
           ? "pending"
-          : state.stage === "failed"
+          : state.stage === "failed" && !capped
             ? "failed"
             : "active";
     return {
@@ -135,6 +204,7 @@ export function TransferStageDetailsCard({
   progressByChunkSet,
   collapsible = false,
   defaultOpen = true,
+  revealIndex,
 }: {
   state: PipelineState;
   progressByChunkSet: ReturnType<typeof useAutoMigration>["progressByChunkSet"];
@@ -142,8 +212,13 @@ export function TransferStageDetailsCard({
   collapsible?: boolean;
   /** With `collapsible`, whether the card starts expanded. */
   defaultOpen?: boolean;
+  /** Cap from `useStagedReveal`. */
+  revealIndex?: number;
 }) {
-  const currentIndex = currentStageIndex(state);
+  const { index: currentIndex, capped } = displayedStageIndex(
+    state,
+    revealIndex,
+  );
   if (currentIndex < 0) return null;
 
   const stages = pipelineStages(state);
@@ -159,7 +234,7 @@ export function TransferStageDetailsCard({
             const status: "completed" | "active" | "failed" =
               index < currentIndex
                 ? "completed"
-                : state.stage === "failed"
+                : state.stage === "failed" && !capped
                   ? "failed"
                   : "active";
             const meta = STAGE_META[stage];

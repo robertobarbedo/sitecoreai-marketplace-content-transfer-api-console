@@ -44,6 +44,7 @@ import {
 import {
   TransferStageDetailsCard,
   TransferStepper,
+  useStagedReveal,
 } from "@/components/migration/transfer-progress";
 import {
   SCOPES,
@@ -406,6 +407,8 @@ export function AutoMigrationTab({
   const showProgress =
     state.stage !== "idle" && (state.confirmed || state.stage === "failed");
   const finished = state.stage === "done" || state.stage === "failed";
+  // Stages that ran behind the confirm dialog replay briefly as "running".
+  const revealIndex = useStagedReveal(state, showProgress);
 
   const overrideTreeCount = dataTrees.filter(
     (tree) => tree.MergeStrategy === "OverrideExistingTree",
@@ -592,6 +595,7 @@ export function AutoMigrationTab({
           <CardContent>
             <TransferStepper
               state={state}
+              revealIndex={revealIndex}
               extraSteps={
                 publishRequested
                   ? [
@@ -656,6 +660,7 @@ export function AutoMigrationTab({
         <TransferStageDetailsCard
           state={state}
           progressByChunkSet={progressByChunkSet}
+          revealIndex={revealIndex}
           collapsible
           defaultOpen={false}
         />
