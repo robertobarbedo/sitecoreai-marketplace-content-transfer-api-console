@@ -10,6 +10,7 @@ import {
   mdiArrowRightBold,
   mdiLoading,
   mdiRestart,
+  mdiRepeat,
 } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,10 @@ import {
   type AutoMigrationStage,
 } from "@/src/utils/hooks/useAutoMigration";
 import { useDestinationPublish } from "@/src/utils/hooks/useDestinationPublish";
-import { isOrganizationEnvironment } from "@/src/utils/environment-client";
+import {
+  environmentDisplayName,
+  isOrganizationEnvironment,
+} from "@/src/utils/environment-client";
 import {
   archiveFileName,
   createArchiveWriter,
@@ -106,6 +110,40 @@ function withTrailingEmpty(rows: PathRow[]): PathRow[] {
   ];
 }
 
+/** Path lines rebuilt from data trees (a repeated transfer). */
+const rowsFromTrees = (trees: DataTree[]): PathRow[] =>
+  withTrailingEmpty(
+    trees.map((tree) => ({
+      id: nextRowId++,
+      itemPath: tree.ItemPath,
+      scope: tree.Scope,
+      mergeStrategy: tree.MergeStrategy,
+    })),
+  );
+
+/** An environment a repeated batch already went to. */
+export interface RepeatTarget {
+  id: string;
+  label: string;
+}
+
+/**
+ * Carries a finished Quick Transfer over to another destination ("Repeat to
+ * another environment"). The page keys the tab by source → destination, so
+ * switching the destination remounts it; the new tab picks this up on mount,
+ * restores the lines and options and opens the confirmation right away.
+ */
+export interface QuickTransferRepeat {
+  sourceId: string;
+  /** The new destination. */
+  destinationId: string;
+  dataTrees: DataTree[];
+  backupFirst: boolean;
+  publishAfter: boolean;
+  /** Destinations this batch already completed on, in order. */
+  sentTo: RepeatTarget[];
+}
+
 const scopeLabel = (value: DataTreeScope) =>
   SCOPES.find((s) => s.value === value)?.label ?? value;
 const mergeLabel = (value: MergeStrategy) =>
@@ -124,6 +162,14 @@ interface AutoMigrationTabProps {
   ) => void;
   /** Reports the pipeline state so the page can lock the rest of the UI. */
   onRunningChange?: (running: boolean) => void;
+  /** Every environment of the current mode (the "Repeat to" choices). */
+  environments: EnvironmentConnection[];
+  /** A repeated transfer to pick up on mount (for THIS source/destination). */
+  repeat?: QuickTransferRepeat | null;
+  /** Called once the repeat was picked up. */
+  onRepeatConsumed?: () => void;
+  /** Repeats the finished transfer to another destination. */
+  onRepeat?: (repeat: QuickTransferRepeat) => void;
 }
 
 export function AutoMigrationTab({
@@ -133,6 +179,10 @@ export function AutoMigrationTab({
   onError,
   showToast,
   onRunningChange,
+  environments,
+  repeat = null,
+  onRepeatConsumed,
+  onRepeat,
 }: AutoMigrationTabProps) {
   const {
     state,
@@ -154,13 +204,33 @@ export function AutoMigrationTab({
     return () => onRunningChange?.(false);
   }, [running, onRunningChange]);
 
-  const [rows, setRows] = useState<PathRow[]>(() => [newRow()]);
+  // Destination backups need the SDK (chunks pass through the browser).
+  const backupAvailable = isOrganizationEnvironment(destination);
+
+  const [rows, setRows] = useState<PathRow[]>(() =>
+    repeat ? rowsFromTrees(repeat.dataTrees) : [newRow()],
+  );
   // The line the tree picker fills (null = closed).
   const [pickerRowId, setPickerRowId] = useState<number | null>(null);
   const [confirmStartOpen, setConfirmStartOpen] = useState(false);
-  // Confirmation options (off by default, reset for every transfer).
-  const [backupFirst, setBackupFirst] = useState(false);
-  const [publishAfter, setPublishAfter] = useState(false);
+  // Confirmation options (off by default and reset for every new transfer; a
+  // repeated transfer keeps the previous run's choices).
+  const [backupFirst, setBackupFirst] = useState(
+    () => !!repeat?.backupFirst && backupAvailable,
+  );
+  const [publishAfter, setPublishAfter] = useState(
+    () => !!repeat?.publishAfter,
+  );
+  // Destinations this batch already completed on (repeat trail).
+  const [sentTo, setSentTo] = useState<RepeatTarget[]>(
+    () => repeat?.sentTo ?? [],
+  );
+  // The "Repeat to" choice on the finished screen.
+  const [repeatTargetId, setRepeatTargetId] = useState("");
+  // What the running/finished transfer was started with, as data trees.
+  const startedTreesRef = useRef<DataTree[]>([]);
+  // The options the running/finished transfer was confirmed with.
+  const confirmedOptionsRef = useRef({ backupFirst: false, publishAfter: false });
   // The backup archive is being opened.
   const [openingBackup, setOpeningBackup] = useState(false);
   // What the running/finished transfer was started with (the lines may be
@@ -173,8 +243,6 @@ export function AutoMigrationTab({
   useEffect(() => {
     confirmStartOpenRef.current = confirmStartOpen;
   }, [confirmStartOpen]);
-  // Destination backups need the SDK (chunks pass through the browser).
-  const backupAvailable = isOrganizationEnvironment(destination);
 
   /** Smart publish of every transferred path (subitems included). */
   const runPublish = async () => {
@@ -337,21 +405,43 @@ export function AutoMigrationTab({
    * up to the upload into the destination and installs only once confirmed
    * (declining discards what was prepared).
    */
-  const handleStart = () => {
+  const handleStart = (keepOptions = false) => {
     startedPathsRef.current = paths;
+    startedTreesRef.current = dataTrees;
     setPublishRequested(false);
     reset();
     publisher.reset();
-    setBackupFirst(false);
-    setPublishAfter(false);
+    if (!keepOptions) {
+      setBackupFirst(false);
+      setPublishAfter(false);
+    }
     start({ dataTrees, awaitConfirmation: true });
     setConfirmStartOpen(true);
+  };
+
+  // A repeated transfer opens its confirmation as soon as the tab mounts
+  // (the ref guards against effects running twice in development).
+  const repeatStartedRef = useRef(false);
+  useEffect(() => {
+    if (!repeat || repeatStartedRef.current) return;
+    repeatStartedRef.current = true;
+    onRepeatConsumed?.();
+    if (pathValid) handleStart(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const rememberConfirmedOptions = () => {
+    confirmedOptionsRef.current = {
+      backupFirst: backupFirst && backupAvailable,
+      publishAfter,
+    };
   };
 
   const closeConfirmation = (confirmed: boolean) => {
     if (openingBackup) return;
     setConfirmStartOpen(false);
     if (confirmed) {
+      rememberConfirmedOptions();
       setPublishRequested(publishAfter);
       confirm();
     } else {
@@ -391,6 +481,7 @@ export function AutoMigrationTab({
       return;
     }
     setConfirmStartOpen(false);
+    rememberConfirmedOptions();
     setPublishRequested(publishAfter);
     confirm({ backup: { archive, fileName, createdAt, label } });
   };
@@ -400,6 +491,38 @@ export function AutoMigrationTab({
     reset();
     publisher.reset();
     setRows([newRow()]);
+    setSentTo([]);
+    setRepeatTargetId("");
+  };
+
+  // "Repeat to another environment": every environment of this mode except
+  // the source and the destinations this batch already completed on.
+  const repeatTargets = environments.filter(
+    (environment) =>
+      environment.id !== source.id &&
+      environment.id !== destination.id &&
+      !sentTo.some((sent) => sent.id === environment.id),
+  );
+
+  /** Hands the finished transfer to the page to run again elsewhere. */
+  const repeatTransfer = () => {
+    const target = repeatTargets.find((env) => env.id === repeatTargetId);
+    if (!target || !onRepeat) return;
+    if (publisher.phase === "running") {
+      // Switching destinations unmounts this tab and its publish watcher.
+      showToast(
+        `Publishing continues on ${destination.label}`,
+        "The publish keeps running in Sitecore — its progress is no longer shown here.",
+      );
+    }
+    onRepeat({
+      sourceId: source.id,
+      destinationId: target.id,
+      dataTrees: startedTreesRef.current,
+      backupFirst: confirmedOptionsRef.current.backupFirst,
+      publishAfter: confirmedOptionsRef.current.publishAfter,
+      sentTo: [...sentTo, { id: destination.id, label: destination.label }],
+    });
   };
 
   // The form gives way to the progress once the user confirmed (or a
@@ -550,7 +673,13 @@ export function AutoMigrationTab({
             )}
 
             <div className="flex flex-col items-center gap-2">
-              <Button onClick={handleStart} disabled={!canStart}>
+              {sentTo.length > 0 && (
+                <p className="text-xs text-text-subtle">
+                  Repeating a transfer already completed on{" "}
+                  {sentTo.map((sent) => sent.label).join(", ")}.
+                </p>
+              )}
+              <Button onClick={() => handleStart()} disabled={!canStart}>
                 Start transfer
               </Button>
               {running && !confirmStartOpen && (
@@ -593,6 +722,42 @@ export function AutoMigrationTab({
             )}
           </CardHeader>
           <CardContent>
+            {sentTo.length > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span className="font-semibold text-text-subtle">Sent to:</span>
+                {sentTo.map((sent) => (
+                  <span
+                    key={sent.id}
+                    className="flex items-center gap-1 rounded-full bg-success-bg px-2 py-0.5 font-medium text-success-fg"
+                  >
+                    <Icon path={mdiCheckCircle} size={0.5} />
+                    {sent.label}
+                  </span>
+                ))}
+                <span
+                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${
+                    state.stage === "done"
+                      ? "bg-success-bg text-success-fg"
+                      : state.stage === "failed"
+                        ? "bg-danger-bg text-danger-fg"
+                        : "bg-primary-bg text-primary-fg"
+                  }`}
+                >
+                  <Icon
+                    path={
+                      state.stage === "done"
+                        ? mdiCheckCircle
+                        : state.stage === "failed"
+                          ? mdiAlertCircle
+                          : mdiLoading
+                    }
+                    size={0.5}
+                    className={finished ? undefined : "animate-spin"}
+                  />
+                  {finished ? destination.label : `now ${destination.label}…`}
+                </span>
+              </div>
+            )}
             <TransferStepper
               state={state}
               revealIndex={revealIndex}
@@ -642,6 +807,46 @@ export function AutoMigrationTab({
                     ? "Nothing was installed — the prepared transfer was discarded."
                     : "The transfer ID was saved to your recent transfers — you can continue or clean it up from the Advanced tab."}
                 </p>
+              </div>
+            )}
+            {state.stage === "done" && onRepeat && repeatTargets.length > 0 && (
+              <div className="mt-4 flex flex-col items-center gap-2 rounded-lg border border-border-muted px-3 py-3">
+                <p className="text-sm font-medium">
+                  Repeat this transfer to another environment
+                </p>
+                <p className="text-center text-xs text-text-subtle">
+                  Same paths, scopes, merge strategies and options from{" "}
+                  {source.label} — you confirm again before anything is
+                  installed.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <Select
+                    value={repeatTargetId}
+                    onValueChange={setRepeatTargetId}
+                  >
+                    <SelectTrigger
+                      className="w-64"
+                      aria-label="Environment to repeat the transfer to"
+                    >
+                      <SelectValue placeholder="Select an environment" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {repeatTargets.map((environment) => (
+                        <SelectItem key={environment.id} value={environment.id}>
+                          {environmentDisplayName(environment)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    onClick={repeatTransfer}
+                    disabled={!repeatTargetId}
+                  >
+                    <Icon path={mdiRepeat} />
+                    Repeat transfer
+                  </Button>
+                </div>
               </div>
             )}
             {finished && (

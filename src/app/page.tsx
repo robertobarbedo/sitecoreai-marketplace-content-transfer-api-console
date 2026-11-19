@@ -24,7 +24,10 @@ import {
   SettingsDialog,
 } from "@/components/settings/settings-dialog";
 import { EnvironmentPicker } from "@/components/migration/environment-picker";
-import { AutoMigrationTab } from "@/components/migration/auto-migration-tab";
+import {
+  AutoMigrationTab,
+  type QuickTransferRepeat,
+} from "@/components/migration/auto-migration-tab";
 import { MigrationTab } from "@/components/migration/migration-tab";
 import { ItemTransfersTab } from "@/components/item-transfers/item-transfers-tab";
 import { HistoryTab } from "@/components/history/history-tab";
@@ -128,6 +131,16 @@ export default function StandaloneExtension() {
   const [backupView, setBackupView] = useState<BackupRestoreView>("backup");
   const [sourceId, setSourceId] = useState("");
   const [destinationId, setDestinationId] = useState("");
+  // A finished Quick Transfer being repeated to another destination — the
+  // remounted tab (keyed by source → destination) picks it up on mount.
+  const [quickRepeat, setQuickRepeat] = useState<QuickTransferRepeat | null>(
+    null,
+  );
+  const clearQuickRepeat = useCallback(() => setQuickRepeat(null), []);
+  const handleQuickRepeat = useCallback((repeat: QuickTransferRepeat) => {
+    setQuickRepeat(repeat);
+    setDestinationId(repeat.destinationId);
+  }, []);
   // While a transfer pipeline runs (Quick Transfer or an executing saved
   // transfer), the whole interface locks — only its Cancel button stays live.
   const [quickRunning, setQuickRunning] = useState(false);
@@ -309,6 +322,7 @@ export default function StandaloneExtension() {
       // Environment ids differ between modes — never carry a selection over.
       setSourceId("");
       setDestinationId("");
+      setQuickRepeat(null);
       setSettingsNotice(null);
       // The history tabs disappear in Organization mode — don't leave the
       // tab strip pointing at one of them.
@@ -411,8 +425,15 @@ export default function StandaloneExtension() {
         mode={mode}
         sourceId={sourceId}
         destinationId={destinationId}
-        onSourceChange={setSourceId}
-        onDestinationChange={setDestinationId}
+        onSourceChange={(id) => {
+          // A manual change drops a pending repeat.
+          setQuickRepeat(null);
+          setSourceId(id);
+        }}
+        onDestinationChange={(id) => {
+          setQuickRepeat(null);
+          setDestinationId(id);
+        }}
         onAction={() =>
           openSettings(organizationMode ? CROSS_ORG_NOTICE : null)
         }
@@ -598,6 +619,16 @@ export default function StandaloneExtension() {
                         onError={handleApiError}
                         showToast={showToast}
                         onRunningChange={setQuickRunning}
+                        environments={environments}
+                        repeat={
+                          quickRepeat &&
+                          quickRepeat.sourceId === source.id &&
+                          quickRepeat.destinationId === destination.id
+                            ? quickRepeat
+                            : null
+                        }
+                        onRepeatConsumed={clearQuickRepeat}
+                        onRepeat={handleQuickRepeat}
                       />
                     ) : (
                       <SelectionHint text="Select a source and a (different) destination environment to start a migration." />

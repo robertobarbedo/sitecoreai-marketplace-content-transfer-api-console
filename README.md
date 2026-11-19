@@ -25,7 +25,10 @@ any credentials, or between organizations with automation clients.
   stage checklist and cancel support. The tree picker has an "All subitems"
   switch next to the selected item (on by default). The confirmation can
   optionally back up the destination's current content first (Organization
-  mode) and smart-publish the transferred paths to Experience Edge afterwards
+  mode) and smart-publish the transferred paths to Experience Edge afterwards.
+  Once a transfer completes, "Repeat this transfer to another environment"
+  sends the same paths and options to the next destination (confirmed again),
+  with a "Sent to" trail for multi-environment rollouts
 - **Advanced** — the same pipeline as four manual steps (create, copy chunk
   sets, consume, clean up) with resume after failure and retry
 - **Saved Transfers** — reusable transfer definitions (source, destination,

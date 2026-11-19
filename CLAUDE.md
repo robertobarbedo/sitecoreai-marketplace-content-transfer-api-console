@@ -210,6 +210,15 @@ attempt runtime testing.** Verification is limited to:
   afterwards" — after `done`, `useDestinationPublish` (shared with Saved
   Transfers, same card `publish-progress-card.tsx`) publishes every
   transferred path, mode SMART, subitems on, related items off.
+  **Repeat to another environment:** after `done`, the Progress card offers
+  the mode's environments minus the source, the current destination and the
+  batch's `sentTo` trail. Choosing one calls `onRepeat(QuickTransferRepeat)`
+  → page.tsx stores it in `quickRepeat` and switches the destination; the
+  tab remounts (keyed by source → destination), restores the lines from the
+  started data trees plus the confirmed backup/publish options, and opens the
+  confirmation on mount (ref-guarded). A manual picker change or mode switch
+  clears a pending repeat. Switching away from a still-running publish only
+  stops watching it (toast says so). "New Quick Transfer" clears the trail.
   The Quick Transfer tree picker passes `showSubitemsToggle` ("All subitems"
   switch beside the selected item, default on) and sets the row's scope.
   It also passes `onSelectMany` (multi-select mode: a checkbox per item, an
