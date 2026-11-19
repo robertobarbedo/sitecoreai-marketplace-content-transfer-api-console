@@ -702,9 +702,53 @@ export function AutoMigrationTab({
         <Card style="outline" padding="md">
           <CardHeader>
             <CardTitle>Progress</CardTitle>
-            {state.transferIds.length > 0 && (
-              <CardDescription className="font-mono text-xs">
-                Transfer {state.transferIds.join(" · ")}
+            {(state.transferIds.length > 0 || sentTo.length > 0) && (
+              <CardDescription className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs">
+                <span className="font-mono">
+                  {state.transferIds.length > 0 &&
+                    `Transfer ${state.transferIds.join(" · ")}`}
+                </span>
+                {/* Repeat trail, right-aligned on the transfer id's row. */}
+                {sentTo.length > 0 && (
+                  <span className="ml-auto flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <span className="font-semibold text-text-subtle">
+                      Sent to:
+                    </span>
+                    {sentTo.map((sent) => (
+                      <span
+                        key={sent.id}
+                        className="flex items-center gap-1 font-medium text-success-fg"
+                      >
+                        <Icon path={mdiCheckCircle} size={0.5} />
+                        {sent.label}
+                      </span>
+                    ))}
+                    <span
+                      className={`flex items-center gap-1 font-medium ${
+                        state.stage === "done"
+                          ? "text-success-fg"
+                          : state.stage === "failed"
+                            ? "text-danger-fg"
+                            : "text-primary-fg"
+                      }`}
+                    >
+                      <Icon
+                        path={
+                          state.stage === "done"
+                            ? mdiCheckCircle
+                            : state.stage === "failed"
+                              ? mdiAlertCircle
+                              : mdiLoading
+                        }
+                        size={0.5}
+                        className={finished ? undefined : "animate-spin"}
+                      />
+                      {finished
+                        ? destination.label
+                        : `now ${destination.label}…`}
+                    </span>
+                  </span>
+                )}
               </CardDescription>
             )}
             {running && (
@@ -722,42 +766,6 @@ export function AutoMigrationTab({
             )}
           </CardHeader>
           <CardContent>
-            {sentTo.length > 0 && (
-              <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                <span className="font-semibold text-text-subtle">Sent to:</span>
-                {sentTo.map((sent) => (
-                  <span
-                    key={sent.id}
-                    className="flex items-center gap-1 rounded-full bg-success-bg px-2 py-0.5 font-medium text-success-fg"
-                  >
-                    <Icon path={mdiCheckCircle} size={0.5} />
-                    {sent.label}
-                  </span>
-                ))}
-                <span
-                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${
-                    state.stage === "done"
-                      ? "bg-success-bg text-success-fg"
-                      : state.stage === "failed"
-                        ? "bg-danger-bg text-danger-fg"
-                        : "bg-primary-bg text-primary-fg"
-                  }`}
-                >
-                  <Icon
-                    path={
-                      state.stage === "done"
-                        ? mdiCheckCircle
-                        : state.stage === "failed"
-                          ? mdiAlertCircle
-                          : mdiLoading
-                    }
-                    size={0.5}
-                    className={finished ? undefined : "animate-spin"}
-                  />
-                  {finished ? destination.label : `now ${destination.label}…`}
-                </span>
-              </div>
-            )}
             <TransferStepper
               state={state}
               revealIndex={revealIndex}
