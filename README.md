@@ -17,6 +17,8 @@ saved transfers, backups to ZIP and post-transfer reconcile/publish cover the
 repeat cases. It works between environments of your own organization without
 any credentials, or between organizations with automation clients.
 
+![Fast Transfer - Step 1 of 2 - Select items](.screenshots/1%20-%20Fast%20Transfer%20-%20Step%201%20of%202%20-%20Select%20items.png)
+
 ## Features
 
 - **Quick Transfer** — pick a content tree path, scope and merge strategy; the
@@ -186,6 +188,32 @@ credentials.
   `/sitecore/system/Modules/Marketplace/ContentReconciliation`: if that app
   isn't installed and set up with exactly one Base environment, the tab shows
   a status screen instead.
+
+## Screenshots
+
+**1. Fast Transfer - Step 1 of 2 - Select items**
+
+![Fast Transfer - Step 1 of 2 - Select items](.screenshots/1%20-%20Fast%20Transfer%20-%20Step%201%20of%202%20-%20Select%20items.png)
+
+**2. Fast Transfer - Step 2 of 2 - Run the transfer**
+
+![Fast Transfer - Step 2 of 2 - Run the transfer](.screenshots/2%20-%20Fast%20Transfer%20-%20Step%202%20of%202%20-%20Run%20the%20transfer.png)
+
+**3. More features - Save a transfer and repeat it in one click**
+
+![More features - Save a transfer and repeat it in one click](.screenshots/3%20-%20More%20features%20-%20Save%20a%20transfer%20and%20repeat%20it%20in%20one%20click.png)
+
+**4. More features - Keep environment-specific values**
+
+![More features - Keep environment-specific values](.screenshots/4%20-%20More%20features%20-%20Keep%20environment-specific%20values.png)
+
+**5. More features - Transfer between organizations**
+
+![More features - Transfer between organizations](.screenshots/5%20-%20More%20features%20-%20Transfer%20between%20organizations.png)
+
+**6. More features - Back up and restore content packages**
+
+![More features - Back up and restore content packages](.screenshots/6%20-%20More%20features%20-%20Back%20up%20and%20restore%20content%20packages.png)
 
 ## Requirements
 
