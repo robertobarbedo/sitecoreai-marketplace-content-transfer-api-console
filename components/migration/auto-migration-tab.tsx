@@ -11,6 +11,7 @@ import {
   mdiLoading,
   mdiRestart,
   mdiRepeat,
+  mdiPlus,
 } from "@mdi/js";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
@@ -504,9 +505,12 @@ export function AutoMigrationTab({
       !sentTo.some((sent) => sent.id === environment.id),
   );
 
+  const repeatTarget = repeatTargets.find((env) => env.id === repeatTargetId);
+  const canRepeat = Boolean(onRepeat) && repeatTargets.length > 0;
+
   /** Hands the finished transfer to the page to run again elsewhere. */
   const repeatTransfer = () => {
-    const target = repeatTargets.find((env) => env.id === repeatTargetId);
+    const target = repeatTarget;
     if (!target || !onRepeat) return;
     if (publisher.phase === "running") {
       // Switching destinations unmounts this tab and its publish watcher.
@@ -817,47 +821,110 @@ export function AutoMigrationTab({
                 </p>
               </div>
             )}
-            {state.stage === "done" && onRepeat && repeatTargets.length > 0 && (
-              <div className="mt-4 flex flex-col items-center gap-2 rounded-lg border border-border-muted px-3 py-3">
-                <p className="text-sm font-medium">
-                  Repeat this transfer to another environment
-                </p>
-                <p className="text-center text-xs text-text-subtle">
-                  Same paths, scopes, merge strategies and options from{" "}
-                  {source.label} — you confirm again before anything is
-                  installed.
-                </p>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <Select
-                    value={repeatTargetId}
-                    onValueChange={setRepeatTargetId}
+            {state.stage === "done" && (
+              <section className="mt-6" aria-labelledby="quick-transfer-next">
+                <h3
+                  id="quick-transfer-next"
+                  className="mb-2 text-sm font-semibold"
+                >
+                  What next?
+                </h3>
+                <div
+                  className={
+                    canRepeat
+                      ? "grid gap-3 md:grid-cols-2"
+                      : "grid gap-3"
+                  }
+                >
+                  {canRepeat && (
+                    <div className="flex flex-col gap-3 rounded-lg border border-border-muted p-4">
+                      <div>
+                        <p className="flex items-center gap-2 text-sm font-semibold">
+                          <Icon path={mdiRepeat} size={0.8} />
+                          Repeat this transfer
+                        </p>
+                        <p className="mt-1 text-xs text-text-subtle">
+                          Same paths, scopes, merge strategies and options from{" "}
+                          {source.label}, to another environment. You confirm
+                          again before anything is installed.
+                        </p>
+                      </div>
+                      <div className="mt-auto flex flex-col gap-2">
+                        <Select
+                          value={repeatTargetId}
+                          onValueChange={setRepeatTargetId}
+                        >
+                          <SelectTrigger
+                            className="w-full"
+                            aria-label="Environment to repeat the transfer to"
+                          >
+                            <SelectValue placeholder="Select an environment" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {repeatTargets.map((environment) => (
+                              <SelectItem
+                                key={environment.id}
+                                value={environment.id}
+                              >
+                                {environmentDisplayName(environment)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={repeatTransfer}
+                          disabled={!repeatTarget}
+                        >
+                          <Icon path={mdiRepeat} />
+                          <span className="truncate">
+                            {repeatTarget
+                              ? `Repeat to ${repeatTarget.label}`
+                              : "Repeat transfer"}
+                          </span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  <div
+                    className={
+                      canRepeat
+                        ? "flex flex-col gap-3 rounded-lg border border-border-muted p-4"
+                        : "flex flex-col items-center gap-3 rounded-lg border border-border-muted p-4 text-center"
+                    }
                   >
-                    <SelectTrigger
-                      className="w-64"
-                      aria-label="Environment to repeat the transfer to"
-                    >
-                      <SelectValue placeholder="Select an environment" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {repeatTargets.map((environment) => (
-                        <SelectItem key={environment.id} value={environment.id}>
-                          {environmentDisplayName(environment)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="outline"
-                    onClick={repeatTransfer}
-                    disabled={!repeatTargetId}
-                  >
-                    <Icon path={mdiRepeat} />
-                    Repeat transfer
-                  </Button>
+                    <div>
+                      <p
+                        className={
+                          canRepeat
+                            ? "flex items-center gap-2 text-sm font-semibold"
+                            : "flex items-center justify-center gap-2 text-sm font-semibold"
+                        }
+                      >
+                        <Icon path={mdiPlus} size={0.8} />
+                        Start a new transfer
+                      </p>
+                      <p className="mt-1 text-xs text-text-subtle">
+                        Pick different paths, source and destination from
+                        scratch.
+                      </p>
+                    </div>
+                    <div className={canRepeat ? "mt-auto" : undefined}>
+                      <Button
+                        variant={canRepeat ? "outline" : "default"}
+                        className={canRepeat ? "w-full" : undefined}
+                        onClick={startOver}
+                      >
+                        <Icon path={mdiPlus} />
+                        New Quick Transfer
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </section>
             )}
-            {finished && (
+            {state.stage === "failed" && (
               <div className="mt-4 flex justify-center">
                 <Button onClick={startOver}>
                   <Icon path={mdiRestart} />
